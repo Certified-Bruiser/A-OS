@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual Environment
+venv/
+.venv/
+
+# Environment Variables
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Audio
+*.wav
+
+# Python build
+build/
+dist/
+*.egg-info/
+
+# Memory Storage (optional)
+app/memory/storage/conversations/*.json
