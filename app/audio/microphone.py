@@ -55,15 +55,20 @@ class Microphone:
     def stop(self):
 
         if self.stream:
-
-            self.stream.stop_stream()
-
-            self.stream.close()
-
-            self.stream = None
+            try:
+                self.stream.stop_stream()
+                self.stream.close()
+            except Exception:
+                pass
+            finally:
+                self.stream = None
 
     def cleanup(self):
 
         self.stop()
 
-        self.audio.terminate()
+        if self.audio:
+            try:
+                self.audio.terminate()
+            except Exception:
+                pass

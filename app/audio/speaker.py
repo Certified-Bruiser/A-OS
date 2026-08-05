@@ -58,12 +58,17 @@ class Speaker:
     def cleanup(self):
 
         if self.stream:
+            try:
+                self.stream.stop_stream()
+                self.stream.close()
+            except Exception:
+                pass
+            finally:
+                self.stream = None
 
-            self.stream.stop_stream()
-
-            self.stream.close()
-
-            self.stream = None
-
-        self.audio.terminate()
+        if self.audio:
+            try:
+                self.audio.terminate()
+            except Exception:
+                pass
 

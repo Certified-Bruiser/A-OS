@@ -1,7 +1,7 @@
 from app.llm.service import LLMService
 from app.memory.service import MemoryService
 
-from app.runtime.queues import (
+from app.runtime.queue import (
     transcript_queue,
     response_queue
 )

@@ -16,20 +16,47 @@ class AgentOSRuntime:
         self.interrupted = False
         self.running = False
         self.task = None
+        self.pending_audio = None
 
     async def start(self):
         if self.running:
             return
 
-        await self.audio_engine.start()
-        self.memory.start_session()
+        try:
+            await self.audio_engine.start()
+            self.memory.start_session()
 
-        # Connect STT websocket
-        await self.stt.connect()
-        await self.tts.connect()
+            # Connect STT websocket
+            await self.stt.connect()
+            await self.tts.connect()
+        except Exception:
+            await self._cleanup_on_start_failure()
+            raise
 
         self.running = True
         self.task = asyncio.create_task(self.run())
+
+    async def _cleanup_on_start_failure(self):
+        self.running = False
+        self.interrupted = False
+
+        try:
+            self.audio_engine.stop()
+        except Exception:
+            pass
+
+        try:
+            await self.stt.disconnect()
+        except Exception:
+            pass
+
+        try:
+            await self.tts.disconnect()
+        except Exception:
+            pass
+
+        if hasattr(self.memory, "session") and getattr(self.memory.session, "active", lambda: False)():
+            self.memory.end_session()
 
     async def stop(self):
         self.running = False
@@ -43,9 +70,18 @@ class AgentOSRuntime:
                 pass
 
         # Disconnect STT websocket
-        await self.stt.disconnect()
-        await self.tts.disconnect()
-        self.memory.end_session()
+        try:
+            await self.stt.disconnect()
+        except Exception:
+            pass
+
+        try:
+            await self.tts.disconnect()
+        except Exception:
+            pass
+
+        if hasattr(self.memory, "session") and getattr(self.memory.session, "active", lambda: False)():
+            self.memory.end_session()
 
         # Return UI to idle
         await self.set_state(AssistantState.IDLE)
@@ -74,6 +110,56 @@ class AgentOSRuntime:
         except Exception as e:
             print(f"Runtime error: {e}")
 
+    async def _speak_with_barge_in(self, response, tts_start):
+        speaking_task = asyncio.create_task(
+            self.tts.speak(
+                response,
+                on_audio_chunk=self.audio_engine.play_frame,
+                tts_start=tts_start,
+                should_stop=lambda: self.interrupted,
+            )
+        )
+        listening_task = asyncio.create_task(self.audio_engine.listen())
+
+        try:
+            done, _ = await asyncio.wait(
+                {speaking_task, listening_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if listening_task in done:
+                audio = await listening_task
+                self.interrupted = True
+                self.audio_engine.stop()
+                speaking_task.cancel()
+
+                try:
+                    await speaking_task
+                except asyncio.CancelledError:
+                    pass
+
+                return audio
+
+            await speaking_task
+            return None
+
+        finally:
+            if not listening_task.done():
+                listening_task.cancel()
+
+                try:
+                    await listening_task
+                except asyncio.CancelledError:
+                    pass
+
+            if not speaking_task.done():
+                speaking_task.cancel()
+
+                try:
+                    await speaking_task
+                except asyncio.CancelledError:
+                    pass
+
     async def listen_once(self):
         # Reset interruption flag for new conversation
         self.interrupted = False
@@ -83,7 +169,11 @@ class AgentOSRuntime:
         # -----------------------------
         await self.set_state(AssistantState.LISTENING)
 
-        audio = await self.audio_engine.listen()
+        if self.pending_audio is not None:
+            audio = self.pending_audio
+            self.pending_audio = None
+        else:
+            audio = await self.audio_engine.listen()
 
         if not audio:
             return
@@ -145,12 +235,12 @@ class AgentOSRuntime:
 
         tts_start = time.perf_counter()
 
-        await self.tts.speak(
-            response,
-            on_audio_chunk=self.audio_engine.play_frame,
-            tts_start=tts_start,
-            should_stop=lambda: self.interrupted,
-        )
+        interrupted_audio = await self._speak_with_barge_in(response, tts_start)
+
+        if interrupted_audio is not None:
+            self.pending_audio = interrupted_audio
+            await self.set_state(AssistantState.INTERRUPTED)
+            return
 
         # After speaking, return to listening
         await self.set_state(AssistantState.LISTENING)

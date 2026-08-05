@@ -21,8 +21,10 @@ class SarvamStreamingTTS:
         self.audio_callback = None
         self.done_event = asyncio.Event()
         self.listener_task = None
+        self._connect_lock = asyncio.Lock()
 
     async def connect(self):
+        await self._disconnect_ws()
         self.ws_context = self.client.text_to_speech_streaming.connect(
             model="bulbul:v3",
             send_completion_event=True,
@@ -30,21 +32,44 @@ class SarvamStreamingTTS:
 
         self.ws = await self.ws_context.__aenter__()
 
-
-
         await self.ws.configure(
             target_language_code="en-IN",
             speaker="rahul",
             output_audio_codec="linear16",
             speech_sample_rate=16000,
         )
-        
 
         self.listener_task = asyncio.create_task(
             self.process_messages()
         )
 
         print("🟢 Connected to Sarvam Streaming TTS")
+
+    async def _disconnect_ws(self):
+        if self.listener_task:
+            listener_task = self.listener_task
+            self.listener_task = None
+            listener_task.cancel()
+
+            try:
+                await listener_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                print(f"TTS listener shutdown warning: {exc}")
+
+        if self.ws_context:
+            try:
+                await self.ws_context.__aexit__(
+                    None,
+                    None,
+                    None,
+                )
+            except Exception as exc:
+                print(f"TTS disconnect warning: {exc}")
+            finally:
+                self.ws_context = None
+                self.ws = None
 
     async def speak(
         self,
@@ -57,18 +82,34 @@ class SarvamStreamingTTS:
             return
 
         self.audio_callback = on_audio_chunk
-
         self.done_event.clear()
 
         print(f"\n📤 Sending to Sarvam TTS:\n{text}\n")
 
-        await self.ws.convert(
-            text=text
-        )
+        async with self._connect_lock:
+            if self.ws is None or self.ws_context is None:
+                await self.connect()
 
-        await self.ws.flush()
+            try:
+                await self.ws.convert(
+                    text=text
+                )
 
-        await self.done_event.wait()
+                await self.ws.flush()
+
+                await asyncio.wait_for(
+                    self.done_event.wait(),
+                    timeout=30,
+                )
+            except asyncio.CancelledError:
+                await self._disconnect_ws()
+                self.done_event.set()
+                raise
+            except asyncio.TimeoutError:
+                print("TTS websocket timed out before completion")
+                self.done_event.set()
+            finally:
+                await self._disconnect_ws()
 
     async def process_messages(self):
         async for message in self.ws:
@@ -114,18 +155,6 @@ class SarvamStreamingTTS:
                 self.done_event.set()
 
     async def disconnect(self):
-        if self.listener_task:
-            self.listener_task.cancel()
-
-            try:
-                await self.listener_task
-            except asyncio.CancelledError:
-                pass
-
-        if self.ws_context:
-            await self.ws_context.__aexit__(
-                None,
-                None,
-                None,
-            )
+        async with self._connect_lock:
+            await self._disconnect_ws()
 

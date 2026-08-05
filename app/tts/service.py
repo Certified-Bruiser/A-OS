@@ -4,6 +4,7 @@ import tempfile
 import os
 import audioop
 import time
+from pathlib import Path
 
 
 class TTSService:
@@ -11,9 +12,10 @@ class TTSService:
 
     def __init__(self):
 
-        self.model = (
-            "C:\\Users\\Anso Jacob\\AgentOS\\en_US-lessac-medium.onnx"
+        self.model = os.getenv("PIPER_MODEL_PATH") or str(
+            Path(__file__).resolve().parents[2] / "en_US-lessac-medium.onnx"
         )
+        self.piper_executable = os.getenv("PIPER_EXECUTABLE", "piper")
 
         self.first_audio = False
 
@@ -31,9 +33,6 @@ class TTSService:
         should_stop=None
 
     ):
-
-
-        self.first_audio = True
 
 
         text = text.strip()
@@ -62,7 +61,7 @@ class TTSService:
 
             process = await asyncio.create_subprocess_exec(
 
-                "piper",
+                self.piper_executable,
 
                 "--model",
 
@@ -163,6 +162,12 @@ class TTSService:
                 ):
                     if should_stop and should_stop():
                         print("TTS Interrupted")
+                        if process.returncode is None:
+                            process.terminate()
+                            try:
+                                await asyncio.wait_for(process.wait(), timeout=2)
+                            except asyncio.TimeoutError:
+                                process.kill()
                         break
 
 

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from dataclasses import asdict
 
-from app.agents.models import Agent
+from app.agents.model import Agent
 
 
 class AgentRegistry:

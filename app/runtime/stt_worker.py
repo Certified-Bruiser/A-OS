@@ -1,5 +1,5 @@
 from app.stt.service import STTService
-from app.runtime.queues import (
+from app.runtime.queue import (
     audio_queue,
     transcript_queue
 )

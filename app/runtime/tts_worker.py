@@ -1,6 +1,8 @@
+import time
+
 from app.tts.service import TTSService
 
-from app.runtime.queues import (
+from app.runtime.queue import (
     response_queue,
     playback_queue
 )
@@ -24,12 +26,20 @@ class TTSWorker:
                 "\n🔊 Generating..."
             )
 
-            audio = await self.tts.synthesize(
-                response
+            chunks = []
+
+            async def capture_chunk(chunk):
+                chunks.append(chunk)
+
+            await self.tts.speak(
+                response,
+                on_audio_chunk=capture_chunk,
+                tts_start=time.perf_counter(),
+                should_stop=None,
             )
 
             await playback_queue.put(
-                audio
+                b"".join(chunks)
             )
 
 

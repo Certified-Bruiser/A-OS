@@ -41,7 +41,10 @@ assistant_state = "idle"
 async def set_state(state: AssistantState):
     global assistant_state
 
-    assistant_state = state
+    if isinstance(state, AssistantState):
+        assistant_state = state.value
+    else:
+        assistant_state = state
 
     await manager.broadcast(
         "state",

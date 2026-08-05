@@ -30,6 +30,7 @@ class AudioEngine:
 
         # Playback state
         self.is_playing = False
+        self.stop_requested = False
 
         # Async playback queue
         self.play_queue = asyncio.Queue()
@@ -122,6 +123,10 @@ class AudioEngine:
                 self.play_queue.task_done()
                 break
 
+            if self.speaker.stopped or self.stop_requested:
+                self.play_queue.task_done()
+                continue
+
             self.is_playing = True
 
             self.processor.process_speaker(frame)
@@ -198,6 +203,7 @@ class AudioEngine:
         if self.speaker.stopped:
             return
 
+        self.stop_requested = False
         self.is_playing = True
 
         self.speaker.resume()
@@ -222,9 +228,11 @@ class AudioEngine:
     def stop(self):
 
         self.is_playing = False
+        self.stop_requested = True
 
         self.playback_buffer.clear()
 
+        self.play_queue.put_nowait(None)
         self.speaker.stop()
 
     # --------------------------------------------------
