@@ -1,8 +1,10 @@
+
 import io
 import wave
 import audioop
 import asyncio
 import time
+
 
 from app.audio.microphone import Microphone
 from app.audio.speaker import Speaker
@@ -11,6 +13,7 @@ from app.vad.service import VADService
 from app.debug.audio_debugger import AudioDebugger
 from app.audio.frame_buffer import FrameBuffer
 from app.conversation.utterance_detector import UtteranceDetector
+
 
 class AudioEngine:
 
@@ -21,95 +24,53 @@ class AudioEngine:
         self.speaker = Speaker()
         self.vad = VADService()
         self.debugger = AudioDebugger()
+
         self.microphone.start()
+
         self.frame_buffer = FrameBuffer()
         self.utterance_detector = UtteranceDetector()
+        self.capture_task = None
+        self.capture_callback = None
+        self.capture_running = False
+
         self.sample_rate = 16000
         self.channels = 1
         self.sample_width = 2
 
+        # -----------------------------------------
         # Playback state
+        # -----------------------------------------
+
         self.is_playing = False
         self.stop_requested = False
 
-        # Async playback queue
+        # Every TTS response gets a generation.
+        # When playback is interrupted, generation increases.
+        # Old chunks are then rejected.
+        self.playback_generation = 0
+
         self.play_queue = asyncio.Queue()
 
-        # Streaming PCM buffer
         self.playback_buffer = bytearray()
 
-        # Playback worker task
         self.playback_task = None
 
-    # --------------------------------------------------
-    # Start playback worker
-    # --------------------------------------------------
+    # -----------------------------------------
+    # START
+    # -----------------------------------------
+
     async def start(self):
+
         if self.playback_task is None:
+
             self.playback_task = asyncio.create_task(
                 self.playback_worker()
             )
 
-    # --------------------------------------------------
-    # Listen until VAD returns a complete utterance
-    # --------------------------------------------------
-    async def listen(self):
-        frames = []
+    # -----------------------------------------
+    # PLAYBACK WORKER
+    # -----------------------------------------
 
-        speech_detected = False
-
-        print("\n🎤 Waiting for speech...")
-
-    # Reset detector
-        self.utterance_detector.reset()
-
-    # Reset analysis buffer
-        self.frame_buffer.clear()
-
-        while True:
-            frame = await asyncio.to_thread(self.microphone.read)
-
-            clean_frame = self.processor.process_microphone(frame)
-
-        # Always keep every frame
-            frames.append(clean_frame)
-
-        # Build larger analysis window
-            self.frame_buffer.add(clean_frame)
-
-            if not self.frame_buffer.ready():
-                continue
-
-            analysis_pcm = self.frame_buffer.get()
-
-            is_speech = self.vad.is_speech(analysis_pcm)
-
-            result = self.utterance_detector.update(is_speech)
-
-            if is_speech and not speech_detected:
-                print("\n🟢 Speech detected")
-                speech_detected = True
-
-            if result == "finished":
-                print("\n⏹️ End of speech")
-                break
-
-        return {
-        "audio": self._pcm_to_wav(
-            b"".join(frames)
-        ),
-        "captured_at": time.perf_counter(),
-    }
-
-
-
-
-
-
-
-    # --------------------------------------------------
-    # Playback worker
-    # --------------------------------------------------
     async def playback_worker(self):
 
         print("🎵 Playback worker running")
@@ -118,95 +79,83 @@ class AudioEngine:
 
             frame = await self.play_queue.get()
 
-            if frame is None:
-                print("🛑 Playback worker stopping")
+            try:
+
+                # None is ONLY shutdown.
+                if frame is None:
+
+                    print("🛑 Playback worker stopping")
+                    return
+
+                # Playback was interrupted.
+                if self.stop_requested:
+
+                    continue
+
+                if self.speaker.stopped:
+
+                    continue
+
+                self.is_playing = True
+
+                # Give exact frame to AEC reverse stream
+                self.processor.process_speaker(frame)
+
+                await asyncio.to_thread(
+                    self.speaker.play,
+                    frame
+                )
+
+            finally:
+
                 self.play_queue.task_done()
-                break
 
-            if self.speaker.stopped or self.stop_requested:
-                self.play_queue.task_done()
-                continue
+                if self.play_queue.empty():
 
-            self.is_playing = True
+                    self.is_playing = False
 
-            self.processor.process_speaker(frame)
+    # -----------------------------------------
+    # BEGIN NEW TTS RESPONSE
+    # -----------------------------------------
 
-            await asyncio.to_thread(
-                self.speaker.play,
-                frame
-            )
+    def begin_playback(self):
 
-            self.play_queue.task_done()
-
-            if self.play_queue.empty():
-                self.is_playing = False
-
-    # --------------------------------------------------
-    # Legacy WAV playback
-    # --------------------------------------------------
-    def play(self, wav_bytes):
-
-        self.is_playing = True
-
-        self.speaker.resume()
-
-        wav = wave.open(
-            io.BytesIO(wav_bytes),
-            "rb"
-        )
-
-        channels = wav.getnchannels()
-        rate = wav.getframerate()
-        width = wav.getsampwidth()
-
-        pcm = wav.readframes(
-            wav.getnframes()
-        )
-
-        wav.close()
-
-        if rate != 16000:
-
-            pcm, _ = audioop.ratecv(
-                pcm,
-                width,
-                channels,
-                rate,
-                16000,
-                None,
-            )
-
-        FRAME_BYTES = 320
-
-        for i in range(0, len(pcm), FRAME_BYTES):
-
-            if self.speaker.stopped:
-                print("\n🛑 Playback interrupted")
-                break
-
-            frame = pcm[i:i + FRAME_BYTES]
-
-            if len(frame) != FRAME_BYTES:
-                break
-
-            self.processor.process_speaker(frame)
-
-            self.speaker.play(frame)
-
-        self.is_playing = False
-
-    # --------------------------------------------------
-    # Streaming playback
-    # --------------------------------------------------
-    async def play_frame(self, chunk):
-
-        if self.speaker.stopped:
-            return
+        self.playback_generation += 1
 
         self.stop_requested = False
-        self.is_playing = True
+        self.is_playing = False
+
+        self.playback_buffer.clear()
 
         self.speaker.resume()
+
+        return self.playback_generation
+
+    # -----------------------------------------
+    # STREAMING TTS
+    # -----------------------------------------
+
+    async def play_frame(
+        self,
+        chunk,
+        generation=None,
+    ):
+
+        # Reject chunks from an old TTS generation.
+        if generation is not None:
+
+            if generation != self.playback_generation:
+
+                return
+
+        # Never restart playback after interruption.
+        if self.stop_requested:
+
+            return
+
+        if self.speaker.stopped:
+
+            return
 
         self.playback_buffer.extend(chunk)
 
@@ -214,31 +163,144 @@ class AudioEngine:
 
         while len(self.playback_buffer) >= FRAME_BYTES:
 
+            # Check again because stop() could have happened
+            # while this coroutine was waiting.
+            if self.stop_requested:
+
+                self.playback_buffer.clear()
+
+                return
+
             frame = bytes(
-                self.playback_buffer[:FRAME_BYTES]
+                self.playback_buffer[
+                    :FRAME_BYTES
+                ]
             )
 
-            del self.playback_buffer[:FRAME_BYTES]
+            del self.playback_buffer[
+                :FRAME_BYTES
+            ]
 
             await self.play_queue.put(frame)
 
-    # --------------------------------------------------
-    # Stop playback immediately
-    # --------------------------------------------------
-    def stop(self):
+            if self.stop_requested:
 
+                self.playback_buffer.clear()
+
+                return
+
+        self.is_playing = True
+
+    async def start_capture(self, callback):
+        if self.capture_task is not None:
+            return
+
+        self.capture_callback = callback
+        self.capture_running = True
+
+        self.capture_task = asyncio.create_task(
+        self._capture_loop()
+    )
+
+        print("🎤 Continuous microphone capture started")
+
+
+    async def _capture_loop(self):
+        try:
+            while self.capture_running:
+                raw_frame = await asyncio.to_thread(
+                self.microphone.read
+            )
+
+                if not raw_frame:
+                    continue
+
+            # IMPORTANT:
+            # Always process microphone audio through AEC.
+                clean_frame = (
+                self.processor.process_microphone(
+                    raw_frame
+                )
+            )
+
+                if self.capture_callback:
+                    result = self.capture_callback(
+                    clean_frame
+                )
+
+                    if asyncio.iscoroutine(result):
+                        await result
+
+                await asyncio.sleep(0)
+
+        except asyncio.CancelledError:
+            print("🛑 Microphone capture stopped")
+
+            raise
+
+        except Exception as e:
+            print(
+            f"❌ Microphone capture error: {e}"
+        )
+
+
+    async def stop_capture(self):
+        self.capture_running = False
+
+        if self.capture_task is not None:
+            self.capture_task.cancel()
+
+            try:
+                await self.capture_task
+
+            except asyncio.CancelledError:
+                pass
+
+        self.capture_task = None
+
+        self.capture_callback = None
+
+
+
+
+    # -----------------------------------------
+    # IMMEDIATE BARGE-IN
+    # -----------------------------------------
+
+    def stop(self):
         self.is_playing = False
         self.stop_requested = True
 
+    # Discard audio that has not reached the speaker.
         self.playback_buffer.clear()
 
-        self.play_queue.put_nowait(None)
+        while True:
+            try:
+                frame = (
+                    self.play_queue.get_nowait()
+                )
+
+                self.play_queue.task_done()
+
+            except asyncio.QueueEmpty:
+                break
+
         self.speaker.stop()
 
-    # --------------------------------------------------
-    # Shutdown
-    # --------------------------------------------------
+        print(
+        "🔇 Local playback cleared"
+    )
+
+
+
+
+    # -----------------------------------------
+    # SHUTDOWN
+    # -----------------------------------------
+
     async def shutdown(self):
+
+        self.stop()
 
         if self.playback_task is not None:
 
@@ -249,35 +311,12 @@ class AudioEngine:
             self.playback_task = None
 
         self.microphone.cleanup()
-
         self.speaker.cleanup()
 
-    # --------------------------------------------------
     def cleanup(self):
 
+        self.stop()
+
         self.microphone.cleanup()
-
         self.speaker.cleanup()
-
-    # --------------------------------------------------
-    # Convert PCM -> WAV
-    # --------------------------------------------------
-    def _pcm_to_wav(self, pcm):
-
-        buffer = io.BytesIO()
-
-        wf = wave.open(
-            buffer,
-            "wb"
-        )
-
-        wf.setnchannels(self.channels)
-        wf.setsampwidth(self.sample_width)
-        wf.setframerate(self.sample_rate)
-
-        wf.writeframes(pcm)
-
-        wf.close()
-
-        return buffer.getvalue()
 

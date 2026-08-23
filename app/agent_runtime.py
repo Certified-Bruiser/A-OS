@@ -1,10 +1,22 @@
 import asyncio
 import time
+
 from app.conversation.state import AssistantState
 
 
 class AgentOSRuntime:
-    def __init__(self, audio_engine, stt, llm, tts, memory, manager, set_state):
+
+    def __init__(
+        self,
+        audio_engine,
+        stt,
+        llm,
+        tts,
+        memory,
+        manager,
+        set_state,
+    ):
+
         self.audio_engine = audio_engine
         self.stt = stt
         self.llm = llm
@@ -13,235 +25,701 @@ class AgentOSRuntime:
         self.manager = manager
         self.set_state = set_state
 
+        # --------------------------------------------------
+        # Runtime state
+        # --------------------------------------------------
+
         self.interrupted = False
         self.running = False
         self.task = None
-        self.pending_audio = None
+
+        # True only while the assistant is actively generating
+        # or speaking a response.
+        self.assistant_active = False
+
+        # Prevent multiple simultaneous interrupt operations.
+        self.interrupt_lock = asyncio.Lock()
+
+        # Task used to interrupt TTS without blocking the
+        # Sarvam STT message listener.
+        self.interrupt_task = None
+
+        # --------------------------------------------------
+        # Connect STT callbacks
+        # --------------------------------------------------
+
+        self.stt.on_speech_start = (
+            self.handle_speech_start
+        )
+
+        self.stt.on_speech_end = (
+            self.handle_speech_end
+        )
+
+    # ======================================================
+    # START
+    # ======================================================
 
     async def start(self):
+
         if self.running:
             return
 
         try:
+
+            # --------------------------------------------------
+            # Start audio engine / playback worker.
+            # --------------------------------------------------
+
             await self.audio_engine.start()
+
+            # --------------------------------------------------
+            # Start memory session.
+            # --------------------------------------------------
+
             self.memory.start_session()
 
-            # Connect STT websocket
+            # --------------------------------------------------
+            # Connect STT BEFORE microphone capture.
+            # --------------------------------------------------
+
             await self.stt.connect()
+
+            # --------------------------------------------------
+            # Connect TTS.
+            # --------------------------------------------------
+
             await self.tts.connect()
+
+            # --------------------------------------------------
+            # Mark runtime running BEFORE microphone capture.
+            #
+            # This is important.
+            #
+            # STT can produce START_SPEECH as soon as audio
+            # starts arriving.
+            # --------------------------------------------------
+
+            self.running = True
+
+            # --------------------------------------------------
+            # Start continuous microphone capture.
+            #
+            # AudioEngine should:
+            #
+            # microphone
+            #     ↓
+            # AEC / processor
+            #     ↓
+            # stt.feed_audio(clean_pcm)
+            #
+            # continuously.
+            # --------------------------------------------------
+
+            await self.audio_engine.start_capture(
+                self.stt.feed_audio
+            )
+
         except Exception:
+
             await self._cleanup_on_start_failure()
+
             raise
 
-        self.running = True
-        self.task = asyncio.create_task(self.run())
+        # --------------------------------------------------
+        # Start conversation loop.
+        # --------------------------------------------------
 
-    async def _cleanup_on_start_failure(self):
-        self.running = False
-        self.interrupted = False
+        self.task = asyncio.create_task(
+            self.run()
+        )
 
-        try:
-            self.audio_engine.stop()
-        except Exception:
-            pass
+        print(
+            "\n🟢 AgentOS Runtime started"
+        )
 
-        try:
-            await self.stt.disconnect()
-        except Exception:
-            pass
+    # ======================================================
+    # STT SPEECH START
+    #
+    # THIS IS THE BARGE-IN TRIGGER.
+    #
+    # Sarvam hears the user while TTS is playing.
+    # START_SPEECH arrives.
+    #
+    # We immediately:
+    #
+    # 1. stop local playback
+    # 2. close TTS websocket
+    # 3. discard future TTS chunks
+    #
+    # STT itself stays connected.
+    # ======================================================
 
-        try:
-            await self.tts.disconnect()
-        except Exception:
-            pass
+    async def handle_speech_start(self):
 
-        if hasattr(self.memory, "session") and getattr(self.memory.session, "active", lambda: False)():
-            self.memory.end_session()
+        print(
+            "\n🗣️ BARGE-IN: USER SPEECH DETECTED"
+        )
 
-    async def stop(self):
-        self.running = False
+        if not self.running:
+            return
 
-        if self.task:
-            self.task.cancel()
+        # --------------------------------------------------
+        # If assistant isn't speaking/generating, this is
+        # simply the beginning of a normal user turn.
+        # --------------------------------------------------
+
+        if not self.assistant_active:
+
+            print(
+                "ℹ️ User speech started normally"
+            )
+
+            return
+
+        async with self.interrupt_lock:
+
+            # Another callback may already have interrupted.
+            if self.interrupted:
+                return
+
+            print(
+                "🛑 BARGE-IN: interrupting assistant"
+            )
+
+            self.interrupted = True
+
+            # --------------------------------------------------
+            # 1. STOP LOCAL PLAYBACK IMMEDIATELY
+            # --------------------------------------------------
 
             try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
 
-        # Disconnect STT websocket
+                self.audio_engine.stop()
+
+            except Exception as e:
+
+                print(
+                    f"⚠️ Audio stop error: {e}"
+                )
+
+            # --------------------------------------------------
+            # 2. CLOSE TTS SOCKET
+            #
+            # Don't let this block the STT listener itself.
+            # --------------------------------------------------
+
+            try:
+
+                if self.interrupt_task is not None:
+
+                    if not self.interrupt_task.done():
+
+                        self.interrupt_task.cancel()
+
+                self.interrupt_task = asyncio.create_task(
+                    self._interrupt_tts()
+                )
+
+            except Exception as e:
+
+                print(
+                    f"⚠️ TTS interrupt scheduling "
+                    f"error: {e}"
+                )
+
+            print(
+                "✅ BARGE-IN LOCAL STOP COMPLETE"
+            )
+
+    # ======================================================
+    # TTS INTERRUPT
+    # ======================================================
+
+    async def _interrupt_tts(self):
+
         try:
-            await self.stt.disconnect()
-        except Exception:
-            pass
 
-        try:
-            await self.tts.disconnect()
-        except Exception:
-            pass
+            await self.tts.interrupt()
 
-        if hasattr(self.memory, "session") and getattr(self.memory.session, "active", lambda: False)():
-            self.memory.end_session()
-
-        # Return UI to idle
-        await self.set_state(AssistantState.IDLE)
-
-    async def interrupt(self):
-        """
-        Interrupt the current conversation pipeline.
-        """
-
-        self.interrupted = True
-
-        # Stop any audio currently playing
-        self.audio_engine.stop()
-
-        print("🛑 Conversation interrupted")
-
-    async def run(self):
-        try:
-            while self.running:
-                await self.listen_once()
+            print(
+                "🔌 TTS interrupted / websocket closed"
+            )
 
         except asyncio.CancelledError:
-            print("Runtime task cancelled")
+
             raise
 
         except Exception as e:
-            print(f"Runtime error: {e}")
 
-    async def _speak_with_barge_in(self, response, tts_start):
-        speaking_task = asyncio.create_task(
-            self.tts.speak(
-                response,
-                on_audio_chunk=self.audio_engine.play_frame,
-                tts_start=tts_start,
-                should_stop=lambda: self.interrupted,
+            print(
+                f"⚠️ TTS interrupt error: {e}"
             )
+
+    # ======================================================
+    # STT SPEECH END
+    # ======================================================
+
+    async def handle_speech_end(self):
+
+        print(
+            "\n🛑 Sarvam detected end of user speech"
         )
-        listening_task = asyncio.create_task(self.audio_engine.listen())
+
+    # ======================================================
+    # START FAILURE CLEANUP
+    # ======================================================
+
+    async def _cleanup_on_start_failure(self):
+
+        self.running = False
+        self.interrupted = False
+        self.assistant_active = False
 
         try:
-            done, _ = await asyncio.wait(
-                {speaking_task, listening_task},
-                return_when=asyncio.FIRST_COMPLETED,
+
+            await self.audio_engine.stop_capture()
+
+        except Exception:
+
+            pass
+
+        try:
+
+            self.audio_engine.stop()
+
+        except Exception:
+
+            pass
+
+        try:
+
+            await self.stt.disconnect()
+
+        except Exception:
+
+            pass
+
+        try:
+
+            await self.tts.disconnect()
+
+        except Exception:
+
+            pass
+
+        if (
+            hasattr(self.memory, "session")
+            and getattr(
+                self.memory.session,
+                "active",
+                lambda: False,
+            )()
+        ):
+
+            self.memory.end_session()
+
+    # ======================================================
+    # STOP
+    # ======================================================
+
+    async def stop(self):
+
+        self.running = False
+
+        self.assistant_active = False
+        self.interrupted = True
+
+        # --------------------------------------------------
+        # Stop main runtime loop.
+        # --------------------------------------------------
+
+        if self.task:
+
+            self.task.cancel()
+
+            try:
+
+                await self.task
+
+            except asyncio.CancelledError:
+
+                pass
+
+            self.task = None
+
+        # --------------------------------------------------
+        # Stop any pending TTS interrupt task.
+        # --------------------------------------------------
+
+        if self.interrupt_task:
+
+            if not self.interrupt_task.done():
+
+                self.interrupt_task.cancel()
+
+                try:
+
+                    await self.interrupt_task
+
+                except asyncio.CancelledError:
+
+                    pass
+
+            self.interrupt_task = None
+
+        # --------------------------------------------------
+        # Stop microphone capture.
+        # --------------------------------------------------
+
+        try:
+
+            await self.audio_engine.stop_capture()
+
+        except Exception:
+
+            pass
+
+        # --------------------------------------------------
+        # Stop playback.
+        # --------------------------------------------------
+
+        try:
+
+            self.audio_engine.stop()
+
+        except Exception:
+
+            pass
+
+        # --------------------------------------------------
+        # Disconnect STT.
+        # --------------------------------------------------
+
+        try:
+
+            await self.stt.disconnect()
+
+        except Exception:
+
+            pass
+
+        # --------------------------------------------------
+        # Disconnect TTS.
+        # --------------------------------------------------
+
+        try:
+
+            await self.tts.disconnect()
+
+        except Exception:
+
+            pass
+
+        # --------------------------------------------------
+        # End memory session.
+        # --------------------------------------------------
+
+        if (
+            hasattr(self.memory, "session")
+            and getattr(
+                self.memory.session,
+                "active",
+                lambda: False,
+            )()
+        ):
+
+            self.memory.end_session()
+
+        await self.set_state(
+            AssistantState.IDLE
+        )
+
+        print(
+            "\n🔴 AgentOS Runtime stopped"
+        )
+
+    # ======================================================
+    # LEGACY INTERRUPT
+    # ======================================================
+
+    async def interrupt(self):
+
+        await self.handle_speech_start()
+
+    # ======================================================
+    # MAIN LOOP
+    # ======================================================
+
+    async def run(self):
+
+        try:
+
+            while self.running:
+
+                await self.listen_once()
+
+        except asyncio.CancelledError:
+
+            print(
+                "🛑 Runtime task cancelled"
             )
 
-            if listening_task in done:
-                audio = await listening_task
-                self.interrupted = True
-                self.audio_engine.stop()
-                speaking_task.cancel()
+            raise
 
-                try:
-                    await speaking_task
-                except asyncio.CancelledError:
-                    pass
+        except Exception as e:
 
-                return audio
+            print(
+                f"❌ Runtime error: {e}"
+            )
 
-            await speaking_task
-            return None
-
-        finally:
-            if not listening_task.done():
-                listening_task.cancel()
-
-                try:
-                    await listening_task
-                except asyncio.CancelledError:
-                    pass
-
-            if not speaking_task.done():
-                speaking_task.cancel()
-
-                try:
-                    await speaking_task
-                except asyncio.CancelledError:
-                    pass
+    # ======================================================
+    # ONE CONVERSATION TURN
+    # ======================================================
 
     async def listen_once(self):
-        # Reset interruption flag for new conversation
+
+        # --------------------------------------------------
+        # New user turn starts here.
+        # --------------------------------------------------
+
         self.interrupted = False
+        self.assistant_active = False
 
-        # -----------------------------
-        # Listening
-        # -----------------------------
-        await self.set_state(AssistantState.LISTENING)
+        # --------------------------------------------------
+        # Tell STT to discard any transcript left over from
+        # the previous turn.
+        #
+        # This is VERY important after barge-in.
+        # --------------------------------------------------
 
-        if self.pending_audio is not None:
-            audio = self.pending_audio
-            self.pending_audio = None
-        else:
-            audio = await self.audio_engine.listen()
+        try:
 
-        if not audio:
-            return
+            await self.stt.prepare_for_turn()
 
-        # -----------------------------
-        # STT
-        # -----------------------------
-        transcript = await self.stt.transcribe(audio["audio"])
+        except AttributeError:
+
+            # Compatibility with older STT provider.
+            pass
+
+        # --------------------------------------------------
+        # LISTENING
+        # --------------------------------------------------
+
+        await self.set_state(
+            AssistantState.LISTENING
+        )
+
+        print(
+            "\n🎤 Waiting for user speech..."
+        )
+
+        # --------------------------------------------------
+        # Sarvam STT is already receiving microphone audio.
+        #
+        # We do NOT call audio_engine.listen().
+        #
+        # We simply wait for Sarvam's finalized transcript.
+        # --------------------------------------------------
+
+        transcript = await self.stt.wait_for_transcript(
+            timeout=15
+        )
 
         if not transcript:
+
+            print(
+                "⚠️ No transcript received"
+            )
+
             return
+
+        # --------------------------------------------------
+        # If shutdown/interruption happened while waiting,
+        # don't process the transcript.
+        # --------------------------------------------------
+
+        if not self.running:
+
+            return
+
+        # --------------------------------------------------
+        # TRANSCRIPT
+        # --------------------------------------------------
+
+        print(
+            f"\n👤 User: {transcript}"
+        )
 
         await self.manager.broadcast(
             "transcript",
-            {"text": transcript}
+            {
+                "text": transcript
+            }
         )
 
-        # Save user message
-        self.memory.save_message("user", transcript)
+        self.memory.save_message(
+            "user",
+            transcript
+        )
 
-        # -----------------------------
-        # Thinking
-        # -----------------------------
-        await self.set_state(AssistantState.THINKING)
+        # --------------------------------------------------
+        # THINKING
+        # --------------------------------------------------
+
+        await self.set_state(
+            AssistantState.THINKING
+        )
 
         context = self.memory.get_context()
 
         response_parts = []
 
-        async for token in self.llm.stream(transcript, context):
+        self.assistant_active = True
 
-            if self.interrupted:
-                print("🛑 LLM generation interrupted")
-                break
+        try:
 
-            response_parts.append(token)
+            async for token in self.llm.stream(
+                transcript,
+                context
+            ):
 
+                if self.interrupted:
 
-        response = "".join(response_parts).strip()
+                    print(
+                        "🛑 LLM generation interrupted"
+                    )
+
+                    return
+
+                response_parts.append(
+                    token
+                )
+
+        finally:
+
+            # Keep assistant_active true until TTS has
+            # completely finished or been interrupted.
+            pass
+
+        response = "".join(
+            response_parts
+        ).strip()
+
+        # --------------------------------------------------
+        # Don't speak if user interrupted during LLM.
+        # --------------------------------------------------
 
         if self.interrupted:
+
+            print(
+                "🛑 Response discarded after interruption"
+            )
+
             return
 
         if not response:
+
+            print(
+                "⚠️ Empty assistant response"
+            )
+
             return
 
-        # Save assistant message
-        self.memory.save_message("assistant", response)
+        # --------------------------------------------------
+        # Broadcast response.
+        # --------------------------------------------------
 
         await self.manager.broadcast(
             "assistant",
-            {"text": response}
+            {
+                "text": response
+            }
         )
 
-        # -----------------------------
-        # Speaking
-        # -----------------------------
-        await self.set_state(AssistantState.SPEAKING)
+        # --------------------------------------------------
+        # SPEAKING
+        # --------------------------------------------------
+
+        await self.set_state(
+            AssistantState.SPEAKING
+        )
 
         tts_start = time.perf_counter()
 
-        interrupted_audio = await self._speak_with_barge_in(response, tts_start)
+        print(
+            "\n🔊 Assistant speaking..."
+        )
 
-        if interrupted_audio is not None:
-            self.pending_audio = interrupted_audio
-            await self.set_state(AssistantState.INTERRUPTED)
+        try:
+
+            await self.tts.speak(
+                response,
+                on_audio_chunk=self.audio_engine.play_frame,
+                tts_start=tts_start,
+                should_stop=lambda:
+                    self.interrupted,
+            )
+
+        except asyncio.CancelledError:
+
+            print(
+                "🛑 TTS task cancelled"
+            )
+
             return
 
-        # After speaking, return to listening
-        await self.set_state(AssistantState.LISTENING)
+        finally:
+
+            self.assistant_active = False
+
+        # --------------------------------------------------
+        # BARGE-IN
+        # --------------------------------------------------
+
+        if self.interrupted:
+
+            print(
+                "\n🛑 Assistant reply interrupted"
+            )
+
+            # IMPORTANT:
+            #
+            # Do NOT save the assistant response as a completed
+            # conversational turn.
+            #
+            # The user interrupted it.
+            #
+
+            await self.set_state(
+                AssistantState.LISTENING
+            )
+
+            # The SAME continuous Sarvam STT connection is
+            # already receiving the user's speech.
+            #
+            # The next loop iteration will consume its
+            # finalized transcript.
+            #
+
+            return
+
+        # --------------------------------------------------
+        # NORMAL COMPLETION
+        # --------------------------------------------------
+
+        self.memory.save_message(
+            "assistant",
+            response
+        )
+
+        await self.set_state(
+            AssistantState.LISTENING
+        )
+
+        print(
+            "\n🎤 Assistant finished. "
+            "Waiting for next user turn..."
+        )
+
 

@@ -1,3 +1,5 @@
+import audioop
+
 from aec_audio_processing import AudioProcessor
 
 
@@ -26,26 +28,32 @@ class AudioProcessorService:
 
         self.processor.set_stream_delay(50)
 
+        self.reverse_frames = 0
+        self.mic_frames = 0
 
-  
+    def process_microphone(self, chunk: bytes):
 
+        processed = self.processor.process_stream(chunk)
 
-    def process_microphone(
-        self,
-        chunk: bytes
-    ):
+        self.mic_frames += 1
 
-        return self.processor.process_stream(
-            chunk
-        )
+        if self.mic_frames % 100 == 0:
 
-    def process_speaker(
-        self,
-        chunk: bytes
-    ):
+            raw_rms = audioop.rms(chunk, 2)
+            processed_rms = audioop.rms(processed, 2)
 
-        self.processor.process_reverse_stream(
-            chunk
-        )
+            print(
+                f"\n🎤 AEC DEBUG"
+                f"\n   raw RMS:       {raw_rms}"
+                f"\n   processed RMS: {processed_rms}"
+                f"\n   reverse frames:{self.reverse_frames}"
+            )
 
+        return processed
+
+    def process_speaker(self, chunk: bytes):
+
+        self.reverse_frames += 1
+
+        self.processor.process_reverse_stream(chunk)
 
