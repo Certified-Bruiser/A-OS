@@ -76,3 +76,17 @@ class AgentRegistry:
                 )
 
         return agents
+
+    def delete(self, agent_id: str):
+
+        file_path = (
+            self.storage_path /
+            f"{agent_id}.json"
+        )
+
+        if not file_path.exists():
+            return False
+
+        file_path.unlink()
+
+        return True

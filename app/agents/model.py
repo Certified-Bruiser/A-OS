@@ -27,6 +27,10 @@ class Agent:
         default_factory=list
     )
 
+    configuration: dict = field(
+        default_factory=dict
+    )
+
     status: str = "DRAFT"
 
     version: str = "1.0"
