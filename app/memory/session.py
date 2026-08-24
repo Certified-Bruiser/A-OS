@@ -6,11 +6,13 @@ class SessionManager:
 
     def __init__(self):
         self.session_id = None
+        self.agent_id = None
         self.started_at = None
         self.ended_at = None
 
-    def start(self):
+    def start(self, agent_id=None):
         self.session_id = str(uuid.uuid4())
+        self.agent_id = agent_id
 
         self.started_at = datetime.utcnow().isoformat()
 
@@ -22,6 +24,7 @@ class SessionManager:
     def metadata(self):
         return {
             "session_id": self.session_id,
+            "agent_id": self.agent_id,
             "started_at": self.started_at,
             "ended_at": self.ended_at,
         }

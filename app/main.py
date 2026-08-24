@@ -34,6 +34,15 @@ class AgentUpdateRequest(BaseModel):
     goal: str | None = None
 
 
+class StartRequest(BaseModel):
+    agent_id: str = Field(min_length=1)
+
+
+class ChatRequest(BaseModel):
+    agent_id: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+
+
 def agent_response(agent: Agent):
     data = {
         **agent.configuration,
@@ -62,6 +71,29 @@ def normalized_status(value):
     if normalized not in VALID_AGENT_STATUSES:
         raise HTTPException(status_code=422, detail="Invalid agent status")
     return normalized
+
+
+def runtime_configuration(agent: Agent):
+    return {
+        **agent.configuration,
+        "agent_id": agent.id,
+        "name": agent.name,
+        "goal": agent.goal,
+        "description": agent.description,
+        "capabilities": agent.capabilities,
+        "knowledge_sources": agent.knowledge_sources,
+        "channels": agent.channels,
+    }
+
+
+def configured_llm(agent: Agent):
+    configuration = runtime_configuration(agent)
+    selected_llm = factory.create_llm(
+        configuration.get("llmProvider", "perplexity")
+    )
+    if hasattr(selected_llm, "configure"):
+        selected_llm.configure(configuration)
+    return selected_llm, configuration
 
 # -----------------------------
 # Services
@@ -125,6 +157,39 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/providers")
+async def providers():
+    return {
+        "stt": [
+            {
+                "id": provider_id,
+                "name": provider.name,
+                "models": ["saaras:v3"] if provider_id == "sarvam" else [],
+                "voices": [],
+            }
+            for provider_id, provider in registry.stt.items()
+        ],
+        "llm": [
+            {
+                "id": provider_id,
+                "name": provider.name,
+                "models": ["sonar"] if provider_id == "perplexity" else [],
+                "voices": [],
+            }
+            for provider_id, provider in registry.llm.items()
+        ],
+        "tts": [
+            {
+                "id": provider_id,
+                "name": provider.name,
+                "models": ["bulbul:v3"] if provider_id == "sarvam" else [],
+                "voices": ["rahul"] if provider_id == "sarvam" else [],
+            }
+            for provider_id, provider in registry.tts.items()
+        ],
+    }
 
 
 @app.post("/agents", status_code=201)
@@ -232,9 +297,69 @@ async def delete_agent(agent_id: str):
     return {"status": "deleted", "id": agent_id}
 
 @app.post("/start")
-async def start():
+async def start(payload: StartRequest):
+    print(f"[AUDIO] start requested agent_id={payload.agent_id}")
+    agent = agent_registry.get(payload.agent_id)
+
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    configuration = runtime_configuration(agent)
+    try:
+        selected_stt = factory.create_stt(configuration.get("sttProvider", "sarvam"))
+        selected_llm, configuration = configured_llm(agent)
+        selected_tts = factory.create_tts(configuration.get("ttsProvider", "sarvam"))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    print(
+        f"[AUDIO] agent_id={agent.id} "
+        f"llm_provider={configuration.get('llmProvider', 'perplexity')} "
+        f"llm_model={configuration.get('llmModel', 'sonar')}"
+    )
+
+    runtime.configure(
+        agent=agent,
+        stt=selected_stt,
+        llm=selected_llm,
+        tts=selected_tts,
+    )
     await runtime.start()
-    return {"status": "started"}
+
+    return {
+        "status": "started",
+        "agent_id": agent.id,
+        "session_id": memory.session.session_id,
+    }
+
+
+@app.post("/chat")
+async def chat(payload: ChatRequest):
+    print("[CHAT] received")
+    print(f"[CHAT] agent_id={payload.agent_id}")
+    print(f"[CHAT] message={payload.message}")
+
+    agent = agent_registry.get(payload.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    try:
+        selected_llm, configuration = configured_llm(agent)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    print(
+        f"[CHAT] llm_provider={configuration.get('llmProvider', 'perplexity')} "
+        f"llm_model={configuration.get('llmModel', 'sonar')}"
+    )
+
+    response_parts = []
+    async for token in selected_llm.stream(payload.message, ""):
+        response_parts.append(token)
+
+    response = "".join(response_parts).strip()
+    print("[CHAT] response sent")
+    return {"agent_id": agent.id, "response": response}
 
 @app.post("/stop")
 async def stop():

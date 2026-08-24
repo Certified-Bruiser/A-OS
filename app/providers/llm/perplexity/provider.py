@@ -9,6 +9,10 @@ class PerplexityLLM(BaseLLM):
 
     def __init__(self):
         self.service = LLMService()
+        print("[PROVIDER] PerplexityLLM instantiated through ProviderFactory")
+
+    def configure(self, configuration):
+        self.service.configure(configuration)
 
     async def stream(self, prompt, context):
         async for token in self.service.stream(prompt, context):

@@ -24,6 +24,7 @@ class AgentOSRuntime:
         self.memory = memory
         self.manager = manager
         self.set_state = set_state
+        self.agent = None
 
         # --------------------------------------------------
         # Runtime state
@@ -56,6 +57,17 @@ class AgentOSRuntime:
             self.handle_speech_end
         )
 
+    def configure(self, agent, stt, llm, tts):
+        if self.running:
+            raise RuntimeError("Cannot configure a running runtime")
+
+        self.agent = agent
+        self.stt = stt
+        self.llm = llm
+        self.tts = tts
+        self.stt.on_speech_start = self.handle_speech_start
+        self.stt.on_speech_end = self.handle_speech_end
+
     # ======================================================
     # START
     # ======================================================
@@ -77,7 +89,9 @@ class AgentOSRuntime:
             # Start memory session.
             # --------------------------------------------------
 
-            self.memory.start_session()
+            self.memory.start_session(
+                agent_id=self.agent.id if self.agent else None
+            )
 
             # --------------------------------------------------
             # Connect STT BEFORE microphone capture.
@@ -550,6 +564,12 @@ class AgentOSRuntime:
         print(
             f"\n👤 User: {transcript}"
         )
+        print(f"[AUDIO] transcript received: {transcript}")
+        print(
+            f"[AUDIO] agent_id={self.agent.id if self.agent else None} "
+            f"llm_provider={getattr(self.llm, 'id', 'unknown')} "
+            f"llm_model={getattr(getattr(self.llm, 'service', None), 'agent_configuration', {}).get('llmModel', 'sonar')}"
+        )
 
         await self.manager.broadcast(
             "transcript",
@@ -605,6 +625,7 @@ class AgentOSRuntime:
         response = "".join(
             response_parts
         ).strip()
+        print("[LLM] response received")
 
         # --------------------------------------------------
         # Don't speak if user interrupted during LLM.
@@ -650,6 +671,7 @@ class AgentOSRuntime:
         print(
             "\n🔊 Assistant speaking..."
         )
+        print("[AUDIO] sending response to TTS")
 
         try:
 
