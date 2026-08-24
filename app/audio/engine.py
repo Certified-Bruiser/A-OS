@@ -54,6 +54,10 @@ class AudioEngine:
         self.playback_buffer = bytearray()
 
         self.playback_task = None
+        self.browser_audio_callback = None
+
+    def set_browser_audio_callback(self, callback):
+        self.browser_audio_callback = callback
 
     # -----------------------------------------
     # START
@@ -119,6 +123,13 @@ class AudioEngine:
     # -----------------------------------------
 
     def begin_playback(self):
+        print(
+    f"[AUDIO] begin_playback ENTER "
+    f"stop_requested={self.stop_requested} "
+    f"speaker.stopped={self.speaker.stopped}"
+)
+
+
 
         self.playback_generation += 1
 
@@ -141,20 +152,47 @@ class AudioEngine:
         generation=None,
     ):
 
+        print(f"[AUDIO] play_frame ENTER bytes={len(chunk)}")
+        print(
+            f"[AUDIO] play_frame STATE "
+            f"stop_requested={self.stop_requested} "
+            f"speaker.stopped={self.speaker.stopped} "
+            f"browser_callback={'present' if self.browser_audio_callback else 'none'}"
+        )
+
         # Reject chunks from an old TTS generation.
         if generation is not None:
 
             if generation != self.playback_generation:
+
+                print("[AUDIO] play_frame RETURN reason=generation_mismatch")
 
                 return
 
         # Never restart playback after interruption.
         if self.stop_requested:
 
+            print("[AUDIO] play_frame RETURN reason=stop_requested")
+
             return
 
         if self.speaker.stopped:
 
+            print("[AUDIO] play_frame RETURN reason=speaker_stopped")
+
+            return
+
+        if self.browser_audio_callback:
+            print(f"[AUDIO] browser callback START bytes={len(chunk)}")
+            try:
+                await self.browser_audio_callback(bytes(chunk))
+            except Exception as exc:
+                print(
+                    f"[AUDIO] browser callback FAILED "
+                    f"bytes={len(chunk)} error={exc}"
+                )
+                raise
+            print(f"[AUDIO] browser callback COMPLETE bytes={len(chunk)}")
             return
 
         self.playback_buffer.extend(chunk)

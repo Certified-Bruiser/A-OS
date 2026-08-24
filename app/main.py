@@ -146,6 +146,7 @@ runtime = AgentOSRuntime(
     manager=manager,
     set_state=set_state,
 )
+audio_engine.set_browser_audio_callback(manager.broadcast_audio)
 
 # -----------------------------
 # Routes

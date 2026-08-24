@@ -403,6 +403,8 @@ class SarvamStreamingTTS:
                             audio_b64
                         )
 
+                        print(f"[TTS] audio chunk received bytes={len(pcm)}")
+
                     except Exception as exc:
 
                         print(
@@ -418,9 +420,24 @@ class SarvamStreamingTTS:
 
                         try:
 
+                            print(
+                                f"[TTS→AUDIO] callback about to run "
+                                f"bytes={len(pcm)} callback={callback}"
+                            )
+
                             await callback(pcm)
 
+                            print(
+                                f"[TTS→AUDIO] callback completed "
+                                f"bytes={len(pcm)}"
+                            )
+
                         except Exception as exc:
+
+                            print(
+                                f"[TTS→AUDIO] callback FAILED "
+                                f"bytes={len(pcm)} error={exc}"
+                            )
 
                             print(
                                 "❌ TTS audio callback error:",

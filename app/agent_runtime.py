@@ -674,6 +674,7 @@ class AgentOSRuntime:
         print("[AUDIO] sending response to TTS")
 
         try:
+            self.audio_engine.begin_playback()
 
             await self.tts.speak(
                 response,
