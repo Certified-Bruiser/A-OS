@@ -43,6 +43,20 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
 
 
+class PromptGeneratorRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    mode: str = Field(pattern="^(generate|improve)$")
+    configuration: dict = Field(default_factory=dict)
+
+
+class PromptGeneratorResponse(BaseModel):
+    purpose: str
+    systemInstructions: str
+    goals: str
+    suggestions: list[str] = Field(default_factory=list)
+
+
 def agent_response(agent: Agent):
     data = {
         **agent.configuration,
@@ -361,6 +375,57 @@ async def chat(payload: ChatRequest):
     response = "".join(response_parts).strip()
     print("[CHAT] response sent")
     return {"agent_id": agent.id, "response": response}
+
+
+@app.post("/prompt-generator", response_model=PromptGeneratorResponse)
+async def generate_prompt(payload: PromptGeneratorRequest):
+    configuration = payload.configuration
+    provider_id = configuration.get("llmProvider", "perplexity")
+
+    try:
+        selected_llm = factory.create_llm(provider_id)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    if hasattr(selected_llm, "configure"):
+        selected_llm.configure(configuration)
+
+    request_context = {
+        "agent_type": configuration.get("agentType", "custom"),
+        "description": configuration.get("description", ""),
+        "personality": configuration.get("personality", ""),
+        "tone": configuration.get("tone", ""),
+        "conversation_style": configuration.get("conversationStyle", ""),
+        "purpose": configuration.get("purpose", ""),
+        "system_instructions": configuration.get("systemInstructions", ""),
+        "goals": configuration.get("goals", ""),
+    }
+    task = "Generate from scratch" if payload.mode == "generate" else "Improve the existing prompt"
+    prompt = f"""
+You are helping configure a voice agent. {task} for exactly these three sections:
+Purpose & Context, System Instructions, and Goals & Success Criteria.
+Use the provided agent configuration as context. For improve mode, preserve the user's intent,
+do not invent policies, prices, capabilities, business rules, hours, products, services, or facts,
+and mention missing information as suggestions instead. Make system instructions suitable for a
+voice agent: natural, concise spoken responses, useful follow-up questions, role boundaries,
+selected personality/tone, and the stated goals.
+Return only valid JSON with this shape:
+{{"purpose":"...","systemInstructions":"...","goals":"...","suggestions":["..."]}}
+Suggestions must be a short list of optional missing details relevant to the selected agent type.
+Mode: {payload.mode}
+Configuration: {request_context}
+"""
+
+    response_parts = []
+    async for token in selected_llm.stream(prompt, ""):
+        response_parts.append(token)
+
+    raw_response = "".join(response_parts).strip()
+    try:
+        import json
+        return PromptGeneratorResponse.model_validate(json.loads(raw_response))
+    except (ValueError, TypeError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=502, detail="The LLM returned an invalid prompt result") from error
 
 @app.post("/stop")
 async def stop():
