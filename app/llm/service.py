@@ -70,49 +70,38 @@ class LLMService:
             "",
         )
 
-        return "\n".join(
-            filter(
-                None,
-                [
-                    f"You are {name}.",
+        allowed_topics = configuration.get("allowedTopics", [])
+        restricted_topics = configuration.get("restrictedTopics", [])
+        escalation_rules = configuration.get("escalationRules", "")
+        human_handoff_conditions = configuration.get("humanHandoffConditions", "")
+        require_confirmation = bool(configuration.get("requireConfirmation", False))
 
-                    (
-                        f"Your purpose is: {purpose}"
-                        if purpose
-                        else ""
-                    ),
+        sections = [
+            f"You are {name}.",
+            f"Your purpose is: {purpose}" if purpose else "",
+            f"System instructions: {instructions}" if instructions else "",
+            f"Personality: {personality}" if personality else "",
+            f"Tone: {tone}" if tone else "",
+            f"Conversation style: {style}" if style else "",
+        ]
 
-                    (
-                        f"System instructions: {instructions}"
-                        if instructions
-                        else ""
-                    ),
+        if allowed_topics:
+            sections.append("Allowed topics: " + ", ".join(str(item) for item in allowed_topics if str(item).strip()))
+        if restricted_topics:
+            sections.append("Restricted topics: " + ", ".join(str(item) for item in restricted_topics if str(item).strip()))
+        if escalation_rules:
+            sections.append(f"Escalation rules: {escalation_rules}")
+        if human_handoff_conditions:
+            sections.append(f"Human handoff conditions: {human_handoff_conditions}")
+        if require_confirmation:
+            sections.append("Require confirmation before taking actions that change data, schedule bookings, send messages, or otherwise affect the user or account.")
 
-                    (
-                        f"Personality: {personality}"
-                        if personality
-                        else ""
-                    ),
-
-                    (
-                        f"Tone: {tone}"
-                        if tone
-                        else ""
-                    ),
-
-                    (
-                        f"Conversation style: {style}"
-                        if style
-                        else ""
-                    ),
-
-                    (
-                        "Answer the user's request accurately "
-                        "and stay within your configured purpose."
-                    ),
-                ],
-            )
+        sections.append(
+            "Answer the user's request accurately and stay within your configured purpose. "
+            "Do not discuss restricted topics, and escalate or hand off when the instructions require it."
         )
+
+        return "\n".join(filter(None, sections))
 
     # ======================================================
     # RUNNING STATUS

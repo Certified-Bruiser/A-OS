@@ -255,11 +255,12 @@ class AudioEngine:
 
             # IMPORTANT:
             # Always process microphone audio through AEC.
+                
                 clean_frame = (
-                self.processor.process_microphone(
-                    raw_frame
+                    self.processor.process_microphone(raw_frame)
                 )
-            )
+                
+            
 
                 if self.capture_callback:
                     result = self.capture_callback(

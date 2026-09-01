@@ -54,6 +54,10 @@ class PromptGeneratorResponse(BaseModel):
     purpose: str
     systemInstructions: str
     goals: str
+    allowedTopics: list[str] = Field(default_factory=list)
+    restrictedTopics: list[str] = Field(default_factory=list)
+    escalationRules: str = ""
+    humanHandoffConditions: str = ""
     suggestions: list[str] = Field(default_factory=list)
 
 
@@ -399,18 +403,32 @@ async def generate_prompt(payload: PromptGeneratorRequest):
         "purpose": configuration.get("purpose", ""),
         "system_instructions": configuration.get("systemInstructions", ""),
         "goals": configuration.get("goals", ""),
+        "allowed_topics": configuration.get("allowedTopics", []),
+        "restricted_topics": configuration.get("restrictedTopics", []),
+        "escalation_rules": configuration.get("escalationRules", ""),
+        "human_handoff_conditions": configuration.get("humanHandoffConditions", ""),
     }
     task = "Generate from scratch" if payload.mode == "generate" else "Improve the existing prompt"
     prompt = f"""
-You are helping configure a voice agent. {task} for exactly these three sections:
-Purpose & Context, System Instructions, and Goals & Success Criteria.
+You are helping configure a voice agent. {task} for exactly these sections:
+Purpose & Context, System Instructions, Goals & Success Criteria, Allowed Topics, Restricted Topics,
+Escalation Rules, and Human Handoff Conditions.
 Use the provided agent configuration as context. For improve mode, preserve the user's intent,
 do not invent policies, prices, capabilities, business rules, hours, products, services, or facts,
-and mention missing information as suggestions instead. Make system instructions suitable for a
-voice agent: natural, concise spoken responses, useful follow-up questions, role boundaries,
-selected personality/tone, and the stated goals.
+and mention missing information as suggestions instead. Make the content specific to the agent's
+role and goals, and keep it realistic for a voice agent: concise spoken responses, clear role boundaries,
+helpful follow-up questions, and safe escalation paths.
 Return only valid JSON with this shape:
-{{"purpose":"...","systemInstructions":"...","goals":"...","suggestions":["..."]}}
+{{
+  "purpose":"...",
+  "systemInstructions":"...",
+  "goals":"...",
+  "allowedTopics":["..."],
+  "restrictedTopics":["..."],
+  "escalationRules":"...",
+  "humanHandoffConditions":"...",
+  "suggestions":["..."]
+}}
 Suggestions must be a short list of optional missing details relevant to the selected agent type.
 Mode: {payload.mode}
 Configuration: {request_context}

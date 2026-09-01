@@ -116,6 +116,8 @@ class STTService:
 
                 # Don't require a long first utterance.
                 first_turn_min_speech_frames=4,
+
+                flush_signal=True,
             )
         )
 
