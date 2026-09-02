@@ -36,6 +36,7 @@ class AgentUpdateRequest(BaseModel):
 
 class StartRequest(BaseModel):
     agent_id: str = Field(min_length=1)
+    user_id: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -317,7 +318,11 @@ async def delete_agent(agent_id: str):
 
 @app.post("/start")
 async def start(payload: StartRequest):
-    print(f"[AUDIO] start requested agent_id={payload.agent_id}")
+    user_id = (payload.user_id or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=422, detail="AOS User ID is required")
+
+    print(f"[AUDIO] start requested agent_id={payload.agent_id} user_id={user_id}")
     agent = agent_registry.get(payload.agent_id)
 
     if agent is None:
@@ -333,6 +338,7 @@ async def start(payload: StartRequest):
 
     print(
         f"[AUDIO] agent_id={agent.id} "
+        f"user_id={user_id} "
         f"llm_provider={configuration.get('llmProvider', 'perplexity')} "
         f"llm_model={configuration.get('llmModel', 'sonar')}"
     )
@@ -342,12 +348,14 @@ async def start(payload: StartRequest):
         stt=selected_stt,
         llm=selected_llm,
         tts=selected_tts,
+        user_id=user_id,
     )
     await runtime.start()
 
     return {
         "status": "started",
         "agent_id": agent.id,
+        "user_id": memory.session.user_id,
         "session_id": memory.session.session_id,
     }
 

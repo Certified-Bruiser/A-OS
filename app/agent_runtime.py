@@ -25,6 +25,8 @@ class AgentOSRuntime:
         self.manager = manager
         self.set_state = set_state
         self.agent = None
+        self.user_id = None
+        self.session_id = None
 
         # --------------------------------------------------
         # Runtime state
@@ -57,7 +59,7 @@ class AgentOSRuntime:
             self.handle_speech_end
         )
 
-    def configure(self, agent, stt, llm, tts):
+    def configure(self, agent, stt, llm, tts, user_id=None):
         if self.running:
             raise RuntimeError("Cannot configure a running runtime")
 
@@ -65,6 +67,8 @@ class AgentOSRuntime:
         self.stt = stt
         self.llm = llm
         self.tts = tts
+        self.user_id = user_id
+        self.session_id = None
         self.stt.on_speech_start = self.handle_speech_start
         self.stt.on_speech_end = self.handle_speech_end
 
@@ -90,8 +94,11 @@ class AgentOSRuntime:
             # --------------------------------------------------
 
             self.memory.start_session(
-                agent_id=self.agent.id if self.agent else None
+                agent_id=self.agent.id if self.agent else None,
+                user_id=self.user_id,
             )
+            self.session_id = self.memory.session.session_id
+            self.user_id = self.memory.session.user_id
 
             # --------------------------------------------------
             # Connect STT BEFORE microphone capture.

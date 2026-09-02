@@ -20,11 +20,11 @@ class MemoryService:
     # Session
     # -----------------------------
 
-    def start_session(self, agent_id=None):
+    def start_session(self, agent_id=None, user_id=None):
 
         self.working.clear()
 
-        self.session.start(agent_id=agent_id)
+        self.session.start(agent_id=agent_id, user_id=user_id)
 
     def end_session(self):
 
