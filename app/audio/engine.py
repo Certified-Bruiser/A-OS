@@ -55,6 +55,12 @@ class AudioEngine:
 
         self.playback_task = None
         self.browser_audio_callback = None
+        
+        # -----------------------------------------
+        # Latency timing (set by agent runtime)
+        # -----------------------------------------
+        
+        self.turn_timing = None
 
     def set_browser_audio_callback(self, callback):
         self.browser_audio_callback = callback
@@ -151,6 +157,11 @@ class AudioEngine:
         chunk,
         generation=None,
     ):
+
+        # Record first playback frame time for latency
+        if (self.turn_timing and 
+            self.turn_timing.playback_first_frame is None):
+            self.turn_timing.playback_first_frame = time.perf_counter()
 
         print(f"[AUDIO] play_frame ENTER bytes={len(chunk)}")
         print(

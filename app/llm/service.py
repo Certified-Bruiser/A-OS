@@ -1,4 +1,5 @@
 import os
+import time
 from openai import AsyncOpenAI
 
 
@@ -11,6 +12,12 @@ class LLMService:
             api_key=os.getenv("PERPLEXITY_API_KEY"),
             base_url="https://api.perplexity.ai",
         )
+        
+        # --------------------------------------------------
+        # Latency timing (set by agent runtime)
+        # --------------------------------------------------
+        
+        self.turn_timing = None
 
     # ======================================================
     # AGENT CONFIGURATION
@@ -206,6 +213,8 @@ User:
         # --------------------------------------------------
 
         try:
+            
+            first_token_recorded = False
 
             async for chunk in response:
 
@@ -220,6 +229,12 @@ User:
                 )
 
                 if token:
+                    
+                    # Record first token time
+                    if (not first_token_recorded and 
+                        self.turn_timing):
+                        self.turn_timing.llm_first_token = time.perf_counter()
+                        first_token_recorded = True
 
                     print(
                         token,
@@ -231,6 +246,10 @@ User:
 
             print("\n\n✅ LLM STREAM COMPLETE")
             print("=" * 60)
+            
+            # Record LLM complete time
+            if self.turn_timing:
+                self.turn_timing.llm_complete = time.perf_counter()
 
         except Exception as e:
 

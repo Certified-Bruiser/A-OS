@@ -18,6 +18,12 @@ class TTSService:
         self.piper_executable = os.getenv("PIPER_EXECUTABLE", "piper")
 
         self.first_audio = False
+        
+        # --------------------------------------------------
+        # Latency timing (set by agent runtime)
+        # --------------------------------------------------
+        
+        self.turn_timing = None
 
 
 
@@ -185,6 +191,10 @@ class TTSService:
 
 
                     if not self.first_audio:
+                        
+                        # Record first audio time for latency
+                        if self.turn_timing:
+                            self.turn_timing.tts_first_audio = time.perf_counter()
 
                         print(
 

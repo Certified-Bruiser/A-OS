@@ -4,6 +4,106 @@ import time
 from app.conversation.state import AssistantState
 
 
+class TurnTiming:
+    """Minimal timing tracker for one conversation turn."""
+    
+    def __init__(self):
+        # STT
+        self.stt_speech_start = None
+        self.stt_first_result = None
+        self.stt_final = None
+        
+        # LLM
+        self.llm_start = None
+        self.llm_first_token = None
+        self.llm_complete = None
+        
+        # TTS
+        self.tts_start = None
+        self.tts_first_audio = None
+        self.tts_complete = None
+        
+        # Playback
+        self.playback_first_frame = None
+        self.playback_start = None
+        
+        # Interruption state
+        self.interrupted = False
+    
+    def calculate_latencies(self):
+        """Calculate all latency metrics."""
+        latencies = {}
+        
+        # STT
+        if self.stt_speech_start and self.stt_final:
+            latencies['stt_final'] = (self.stt_final - self.stt_speech_start) * 1000
+        
+        if self.stt_speech_start and self.stt_first_result:
+            latencies['stt_first'] = (self.stt_first_result - self.stt_speech_start) * 1000
+        
+        # LLM
+        if self.llm_start and self.llm_first_token:
+            latencies['llm_first_token'] = (self.llm_first_token - self.llm_start) * 1000
+        
+        if self.llm_start and self.llm_complete:
+            latencies['llm_total'] = (self.llm_complete - self.llm_start) * 1000
+        
+        # TTS
+        if self.tts_start and self.tts_first_audio:
+            latencies['tts_first_audio'] = (self.tts_first_audio - self.tts_start) * 1000
+        
+        if self.tts_start and self.tts_complete:
+            latencies['tts_total'] = (self.tts_complete - self.tts_start) * 1000
+        
+        # Pipeline transitions
+        if self.stt_final and self.llm_start:
+            latencies['stt_to_llm'] = (self.llm_start - self.stt_final) * 1000
+        
+        if self.llm_complete and self.tts_start:
+            latencies['llm_to_tts'] = (self.tts_start - self.llm_complete) * 1000
+        
+        if self.tts_first_audio and self.playback_first_frame:
+            latencies['tts_to_playback'] = (self.playback_first_frame - self.tts_first_audio) * 1000
+        
+        # End-to-end speech to first audio
+        if self.stt_speech_start and self.playback_first_frame:
+            latencies['speech_to_audio'] = (self.playback_first_frame - self.stt_speech_start) * 1000
+        
+        return latencies
+    
+    def print_summary(self):
+        """Print latency summary to terminal."""
+        latencies = self.calculate_latencies()
+        
+        print("\n" + "=" * 60)
+        print("VOICE LATENCY")
+        
+        if self.interrupted:
+            print("TURN INTERRUPTED")
+        
+        print("=" * 60)
+        
+        if 'stt_final' in latencies:
+            print(f"STT Final Latency       : {latencies['stt_final']:.0f} ms")
+        
+        if 'llm_first_token' in latencies:
+            print(f"LLM First Token         : {latencies['llm_first_token']:.0f} ms")
+        
+        if 'llm_total' in latencies:
+            print(f"LLM Total               : {latencies['llm_total']:.0f} ms")
+        
+        if 'tts_first_audio' in latencies:
+            print(f"TTS First Audio         : {latencies['tts_first_audio']:.0f} ms")
+        
+        if 'tts_total' in latencies:
+            print(f"TTS Total               : {latencies['tts_total']:.0f} ms")
+        
+        if 'speech_to_audio' in latencies:
+            print(f"Speech → First Audio    : {latencies['speech_to_audio']:.0f} ms")
+        
+        print("=" * 60)
+
+
 class AgentOSRuntime:
 
     def __init__(
@@ -506,6 +606,18 @@ class AgentOSRuntime:
 
         self.interrupted = False
         self.assistant_active = False
+        
+        # --------------------------------------------------
+        # Create timing tracker for this turn.
+        # --------------------------------------------------
+        
+        turn_timing = TurnTiming()
+        
+        # Make it available to services
+        self.stt.turn_timing = turn_timing
+        self.llm.turn_timing = turn_timing
+        self.tts.turn_timing = turn_timing
+        self.audio_engine.turn_timing = turn_timing
 
         # --------------------------------------------------
         # Tell STT to discard any transcript left over from
@@ -577,6 +689,9 @@ class AgentOSRuntime:
             f"llm_provider={getattr(self.llm, 'id', 'unknown')} "
             f"llm_model={getattr(getattr(self.llm, 'service', None), 'agent_configuration', {}).get('llmModel', 'sonar')}"
         )
+        
+        # Record STT final transcript time (timing started by STT service)
+        turn_timing.stt_final = time.perf_counter()
 
         await self.manager.broadcast(
             "transcript",
@@ -597,6 +712,9 @@ class AgentOSRuntime:
         await self.set_state(
             AssistantState.THINKING
         )
+        
+        # Record LLM start time
+        turn_timing.llm_start = time.perf_counter()
 
         context = self.memory.get_context()
 
@@ -674,6 +792,9 @@ class AgentOSRuntime:
         )
 
         tts_start = time.perf_counter()
+        
+        # Record TTS start time
+        turn_timing.tts_start = tts_start
 
         print(
             "\n🔊 Assistant speaking..."
@@ -690,6 +811,9 @@ class AgentOSRuntime:
                 should_stop=lambda:
                     self.interrupted,
             )
+            
+            # Record TTS complete time
+            turn_timing.tts_complete = time.perf_counter()
 
         except asyncio.CancelledError:
 
@@ -712,6 +836,10 @@ class AgentOSRuntime:
             print(
                 "\n🛑 Assistant reply interrupted"
             )
+
+            # Mark as interrupted for latency reporting
+            turn_timing.interrupted = True
+            turn_timing.print_summary()
 
             # IMPORTANT:
             #
@@ -742,6 +870,12 @@ class AgentOSRuntime:
             "assistant",
             response
         )
+        
+        # Record LLM complete time
+        turn_timing.llm_complete = time.perf_counter()
+        
+        # Print latency summary for this turn
+        turn_timing.print_summary()
 
         await self.set_state(
             AssistantState.LISTENING

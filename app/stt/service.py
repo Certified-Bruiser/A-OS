@@ -3,6 +3,7 @@ import wave
 import base64
 import asyncio
 import os
+import time
 
 from dotenv import load_dotenv
 from sarvamai import AsyncSarvamAI
@@ -82,6 +83,12 @@ class STTService:
         # --------------------------------------------------
 
         self.connected = False
+        
+        # --------------------------------------------------
+        # Latency timing (set by agent runtime)
+        # --------------------------------------------------
+        
+        self.turn_timing = None
 
     # ======================================================
     # CONNECT
@@ -551,6 +558,10 @@ class STTService:
                         if not self.speech_active:
 
                             self.speech_active = True
+                            
+                            # Record speech start time for latency
+                            if self.turn_timing:
+                                self.turn_timing.stt_speech_start = time.perf_counter()
 
                             self.speech_start_event.set()
 
@@ -639,6 +650,11 @@ class STTService:
                         "\n📝 Transcript: "
                         f"{transcript}"
                     )
+                    
+                    # Record first result time if this is the first result
+                    if (self.turn_timing and 
+                        self.turn_timing.stt_first_result is None):
+                        self.turn_timing.stt_first_result = time.perf_counter()
 
                     # Keep the latest transcript for debugging/
                     # compatibility.
