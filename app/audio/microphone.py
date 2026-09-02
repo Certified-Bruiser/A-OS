@@ -26,6 +26,7 @@ class Microphone:
             rate=self.sample_rate,
             input=True,
             frames_per_buffer=self.chunk_size,
+            input_device_index=None,  # Use default input device
         )
 
         print("🎤 Microphone started")
