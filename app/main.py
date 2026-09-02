@@ -14,6 +14,7 @@ from app.audio.engine import AudioEngine
 from app.llm.service import LLMService
 from app.tts.service import TTSService
 from app.memory.service import MemoryService
+from app.security import RateLimiter, RateLimitExceeded, SpamDetected, TemporarilyBlocked
 
 app = FastAPI(title="AgentOS")
 agent_registry = AgentRegistry()
@@ -123,6 +124,15 @@ stt = factory.create_stt("sarvam")
 llm = factory.create_llm("perplexity")
 tts = factory.create_tts("sarvam")
 memory = MemoryService()
+
+# Rate limiting configuration
+rate_limiter = RateLimiter(
+    max_requests_per_window=5,        # Max 5 conversation starts
+    window_seconds=60,                # Per 60 seconds
+    spam_threshold=3,                 # 3 identical requests
+    spam_window_seconds=30,           # In 30 seconds = spam
+    block_duration_seconds=300,       # Block for 5 minutes
+)
 
 # -----------------------------
 # CORS
@@ -321,6 +331,16 @@ async def start(payload: StartRequest):
     user_id = (payload.user_id or "").strip()
     if not user_id:
         raise HTTPException(status_code=422, detail="AOS User ID is required")
+
+    # Check rate limiting and spam detection
+    try:
+        rate_limiter.check_and_record(user_id=user_id, agent_id=payload.agent_id)
+    except TemporarilyBlocked as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
+    except SpamDetected as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
+    except RateLimitExceeded as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
 
     print(f"[AUDIO] start requested agent_id={payload.agent_id} user_id={user_id}")
     agent = agent_registry.get(payload.agent_id)
