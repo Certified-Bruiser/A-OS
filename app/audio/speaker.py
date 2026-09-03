@@ -7,10 +7,12 @@ class Speaker:
         self,
         sample_rate=16000,
         channels=1,
+        output_device_index=None,
     ):
 
         self.sample_rate = sample_rate
         self.channels = channels
+        self.output_device_index = output_device_index
 
         self.audio = pyaudio.PyAudio()
 
@@ -20,6 +22,7 @@ class Speaker:
             rate=sample_rate,
             output=True,
             frames_per_buffer=320,
+            output_device_index=output_device_index,
         )
 
         self.stopped = False
@@ -67,7 +70,6 @@ class Speaker:
             try:
 
                 if not self.stream.is_active():
-
                     self.stream.start_stream()
 
             except Exception:
@@ -78,7 +80,6 @@ class Speaker:
         if self.stream:
 
             try:
-
                 self.stream.stop_stream()
                 self.stream.close()
 
@@ -86,7 +87,6 @@ class Speaker:
                 pass
 
             finally:
-
                 self.stream = None
 
         if self.audio:
@@ -98,7 +98,6 @@ class Speaker:
                 pass
 
             finally:
-
                 self.audio = None
 
 
