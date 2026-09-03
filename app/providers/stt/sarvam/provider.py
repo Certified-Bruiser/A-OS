@@ -11,6 +11,22 @@ class SarvamSTT(BaseSTT):
 
         self.service = STTService()
 
+    @property
+    def on_speech_start(self):
+        return self.service.on_speech_start
+
+    @on_speech_start.setter
+    def on_speech_start(self, callback):
+        self.service.on_speech_start = callback
+
+    @property
+    def on_speech_end(self):
+        return self.service.on_speech_end
+
+    @on_speech_end.setter
+    def on_speech_end(self, callback):
+        self.service.on_speech_end = callback
+
     # ======================================================
     # CONNECT
     # ======================================================

@@ -41,17 +41,3 @@ class SarvamTTS(BaseTTS):
             should_stop=should_stop,
         )
 
-    async def interrupt(self):
-        print(
-        "\n🛑 Sarvam TTS interrupt"
-    )
-
-    # Wake speak() if it is waiting for completion.
-        self.done_event.set()
-
-    # Closing the websocket is the actual
-    # server-side cancellation mechanism.
-        await self._disconnect_ws()
-
-
-
