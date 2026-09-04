@@ -139,6 +139,8 @@ class AgentOSRuntime:
         # True only while the assistant is actively generating
         # or speaking a response.
         self.assistant_active = False
+        self.playback_generation = 0
+        self.playback_complete_event = None
 
         # Prevent multiple simultaneous interrupt operations.
         self.interrupt_lock = asyncio.Lock()
@@ -278,11 +280,19 @@ class AgentOSRuntime:
 
     async def handle_speech_start(self):
 
+        print("[INTERRUPT] handle_speech_start entered")
+        print(f"[INTERRUPT] running={self.running}")
+        print(f"[INTERRUPT] assistant_active={self.assistant_active}")
+        print(f"[INTERRUPT] interrupted={self.interrupted}")
+
         print(
             "\n🗣️ BARGE-IN: USER SPEECH DETECTED"
         )
 
         if not self.running:
+
+            print("[INTERRUPT] ignored reason=running is False")
+
             return
 
         # --------------------------------------------------
@@ -292,6 +302,8 @@ class AgentOSRuntime:
 
         if not self.assistant_active:
 
+            print("[INTERRUPT] ignored reason=assistant_active is False")
+
             print(
                 "ℹ️ User speech started normally"
             )
@@ -300,15 +312,33 @@ class AgentOSRuntime:
 
         async with self.interrupt_lock:
 
+            print("[INTERRUPT] lock acquired")
+
             # Another callback may already have interrupted.
             if self.interrupted:
+
+                print("[INTERRUPT] ignored reason=interrupted is already True")
+
                 return
+
+            print("[INTERRUPT] executing barge-in")
 
             print(
                 "🛑 BARGE-IN: interrupting assistant"
             )
 
             self.interrupted = True
+            self.playback_generation += 1
+            if self.playback_complete_event is not None:
+                self.playback_complete_event.set()
+            self.assistant_active = False
+
+            await self.manager.broadcast(
+                "interruption",
+                {
+                    "generation": self.playback_generation,
+                }
+            )
 
             # --------------------------------------------------
             # 1. STOP LOCAL PLAYBACK IMMEDIATELY
@@ -317,6 +347,7 @@ class AgentOSRuntime:
             try:
 
                 self.audio_engine.stop()
+                print("[INTERRUPT] AudioEngine.stop completed")
 
             except Exception as e:
 
@@ -341,6 +372,7 @@ class AgentOSRuntime:
                 self.interrupt_task = asyncio.create_task(
                     self._interrupt_tts()
                 )
+                print("[INTERRUPT] TTS interruption scheduled")
 
             except Exception as e:
 
@@ -387,6 +419,34 @@ class AgentOSRuntime:
             "\n🛑 Sarvam detected end of user speech"
         )
 
+    async def handle_playback_complete(self, generation):
+
+        if generation != self.playback_generation:
+
+            print(
+                f"[AUDIO] playback completion ignored generation={generation} "
+                f"current={self.playback_generation}"
+            )
+
+            return
+
+        if not self.assistant_active or self.interrupted:
+
+            return
+
+        self.assistant_active = False
+
+        if self.playback_complete_event is not None:
+            self.playback_complete_event.set()
+
+    async def handle_browser_disconnect(self):
+
+        if self.assistant_active:
+            self.assistant_active = False
+
+        if self.playback_complete_event is not None:
+            self.playback_complete_event.set()
+
     # ======================================================
     # START FAILURE CLEANUP
     # ======================================================
@@ -395,7 +455,8 @@ class AgentOSRuntime:
 
         self.running = False
         self.interrupted = False
-        self.assistant_active = False
+        if not self.assistant_active:
+            self.assistant_active = False
 
         try:
 
@@ -776,10 +837,15 @@ class AgentOSRuntime:
         # Broadcast response.
         # --------------------------------------------------
 
+        self.playback_generation += 1
+        playback_generation = self.playback_generation
+        self.playback_complete_event = asyncio.Event()
+
         await self.manager.broadcast(
             "assistant",
             {
-                "text": response
+                "text": response,
+                "generation": playback_generation,
             }
         )
 
@@ -815,17 +881,32 @@ class AgentOSRuntime:
             # Record TTS complete time
             turn_timing.tts_complete = time.perf_counter()
 
+            await self.manager.broadcast(
+                "tts_complete",
+                {
+                    "generation": playback_generation,
+                }
+            )
+
+            await self.playback_complete_event.wait()
+
         except asyncio.CancelledError:
 
             print(
                 "🛑 TTS task cancelled"
             )
 
+            self.assistant_active = False
+
+            if self.playback_complete_event is not None:
+                self.playback_complete_event.set()
+
             return
 
         finally:
 
-            self.assistant_active = False
+            if self.interrupted:
+                self.assistant_active = False
 
         # --------------------------------------------------
         # BARGE-IN

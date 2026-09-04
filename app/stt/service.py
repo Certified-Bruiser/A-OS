@@ -529,6 +529,7 @@ class STTService:
         print(
             "📡 STT message listener running"
         )
+        print("[STT] listener started")
 
         try:
 
@@ -548,6 +549,7 @@ class STTService:
                         f"\n🎙️ Sarvam STT: "
                         f"{signal}"
                     )
+                    print(f"[VAD] event={signal}")
 
                     # ----------------------------------------------
                     # USER STARTED SPEAKING
@@ -555,7 +557,14 @@ class STTService:
 
                     if signal == "START_SPEECH":
 
+                        print("[VAD] START_SPEECH received")
+                        print(f"[VAD] speech_active before={self.speech_active}")
+                        print(f"[VAD] on_speech_start present={self.on_speech_start is not None}")
+                        print(f"[VAD] callback={self.on_speech_start!r}")
+
                         if not self.speech_active:
+
+                            print("[VAD] START_SPEECH accepted")
 
                             self.speech_active = True
                             
@@ -573,6 +582,8 @@ class STTService:
                             # barge-in trigger.
                             if self.on_speech_start:
 
+                                print("[VAD] invoking on_speech_start")
+
                                 try:
 
                                     result = (
@@ -585,6 +596,8 @@ class STTService:
 
                                         await result
 
+                                    print("[VAD] on_speech_start completed")
+
                                 except Exception as e:
 
                                     print(
@@ -592,21 +605,39 @@ class STTService:
                                         f"callback error: {e}"
                                     )
 
+                                    print(f"[VAD] on_speech_start error={e}")
+
+                            else:
+
+                                print("[VAD] START_SPEECH accepted but callback not invoked")
+
+                        else:
+
+                            print("[VAD] START_SPEECH suppressed reason=speech_active already True")
+
                     # ----------------------------------------------
                     # USER STOPPED SPEAKING
                     # ----------------------------------------------
 
                     elif signal == "END_SPEECH":
 
+                        print("[VAD] END_SPEECH received")
+                        print(f"[VAD] speech_active before={self.speech_active}")
+
                         self.speech_active = False
+
+                        print(f"[VAD] speech_active after={self.speech_active}")
 
                         self.speech_end_event.set()
 
                         print(
                             "\n🛑 USER SPEECH END"
                         )
+                        print(f"[VAD] on_speech_end present={self.on_speech_end is not None}")
 
                         if self.on_speech_end:
+
+                            print("[VAD] invoking on_speech_end")
 
                             try:
 
@@ -620,12 +651,16 @@ class STTService:
 
                                     await result
 
+                                    print("[VAD] on_speech_end completed")
+
                             except Exception as e:
 
                                 print(
                                     "\n❌ Speech-end "
                                     f"callback error: {e}"
                                 )
+
+                                print(f"[VAD] on_speech_end error={e}")
 
                 # ==================================================
                 # TRANSCRIPT
@@ -677,6 +712,8 @@ class STTService:
                         f"{message}"
                     )
 
+            print("[STT] listener exited")
+
         except asyncio.CancelledError:
 
             print(
@@ -690,6 +727,7 @@ class STTService:
             print(
                 f"\n❌ STT listener error: {e}"
             )
+            print(f"[STT] listener error: {e}")
 
     # ======================================================
     # DISCONNECT

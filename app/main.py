@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
@@ -495,8 +496,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            await websocket.receive_text()
+            message = json.loads(await websocket.receive_text())
+
+            if message.get("event") == "playback_complete":
+                generation = message.get("data", {}).get("generation")
+                await runtime.handle_playback_complete(generation)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+        await runtime.handle_browser_disconnect()
 
