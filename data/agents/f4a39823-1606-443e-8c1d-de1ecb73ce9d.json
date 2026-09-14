@@ -1,17 +1,17 @@
 {
-    "name": "afasfasfasf",
+    "name": "aria",
     "goal": "",
-    "id": "bb13d7d9-c201-4e74-aead-86af93ce85a5",
-    "description": "Strict Agent",
+    "id": "f4a39823-1606-443e-8c1d-de1ecb73ce9d",
+    "description": "cake bakery customer support agent",
     "capabilities": [],
     "knowledge_sources": [],
     "channels": [],
     "configuration": {
-        "name": "afasfasfasf",
-        "description": "Strict Agent",
+        "name": "aria",
+        "description": "cake bakery customer support agent",
         "agentType": "customer-support",
-        "purpose": "Info about cars",
-        "systemInstructions": "You are a helpful, knowledgeable AI voice assistant. Be concise, friendly, and stay on topic. If you don't know something, say so honestly.",
+        "purpose": "",
+        "systemInstructions": "",
         "personality": "friendly",
         "tone": "warm",
         "conversationStyle": "conversational",
@@ -54,6 +54,6 @@
     },
     "status": "PUBLISHED",
     "version": "1.0",
-    "created_at": "2026-08-23T23:18:52.060030",
-    "updated_at": "2026-08-23T23:18:52.060051"
+    "created_at": "2026-09-11T12:23:13.768293",
+    "updated_at": "2026-09-11T12:29:21.065474"
 }

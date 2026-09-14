@@ -98,6 +98,7 @@ def runtime_configuration(agent: Agent):
     return {
         **agent.configuration,
         "agent_id": agent.id,
+        "agent_definition": agent_registry.load_definition(agent.id),
         "name": agent.name,
         "goal": agent.goal,
         "description": agent.description,
@@ -107,8 +108,8 @@ def runtime_configuration(agent: Agent):
     }
 
 
-def configured_llm(agent: Agent):
-    configuration = runtime_configuration(agent)
+def configured_llm(agent: Agent, configuration=None):
+    configuration = configuration or runtime_configuration(agent)
     selected_llm = factory.create_llm(
         configuration.get("llmProvider", "perplexity")
     )
@@ -352,7 +353,7 @@ async def start(payload: StartRequest):
     configuration = runtime_configuration(agent)
     try:
         selected_stt = factory.create_stt(configuration.get("sttProvider", "sarvam"))
-        selected_llm, configuration = configured_llm(agent)
+        selected_llm, configuration = configured_llm(agent, configuration)
         selected_tts = factory.create_tts(configuration.get("ttsProvider", "sarvam"))
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
