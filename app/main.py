@@ -207,7 +207,11 @@ async def providers():
             {
                 "id": provider_id,
                 "name": provider.name,
-                "models": ["sonar"] if provider_id == "perplexity" else [],
+                "models": getattr(
+                    provider,
+                    "models",
+                    ["sonar"] if provider_id == "perplexity" else [],
+                ),
                 "voices": [],
             }
             for provider_id, provider in registry.llm.items()
@@ -464,15 +468,21 @@ Mode: {payload.mode}
 Configuration: {request_context}
 """
 
-    response_parts = []
-    async for token in selected_llm.stream(prompt, ""):
-        response_parts.append(token)
-
-    raw_response = "".join(response_parts).strip()
+    raw_response = await selected_llm.generate_structured(
+        prompt,
+        "",
+        PromptGeneratorResponse.model_json_schema(),
+    )
+    print(f"Prompt Generator provider: {provider_id}")
+    print(f"Prompt Generator model: {configuration.get('llmModel', '')}")
+    print("Prompt Generator raw response:")
+    print(raw_response)
     try:
         import json
         return PromptGeneratorResponse.model_validate(json.loads(raw_response))
     except (ValueError, TypeError, json.JSONDecodeError) as error:
+        print("Prompt Generator parse error:")
+        print(f"{type(error).__name__}: {error}")
         raise HTTPException(status_code=502, detail="The LLM returned an invalid prompt result") from error
 
 @app.post("/stop")
