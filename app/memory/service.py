@@ -60,13 +60,50 @@ class MemoryService:
     # Long-Term Memory
     # -----------------------------
 
-    def remember(self, fact):
+    def remember(self, category, key, value, source="user", confidence=1.0):
 
-        self.long_term.remember(fact)
+        return self.long_term.remember(
+            agent_id=self.session.agent_id,
+            user_id=self.session.user_id,
+            category=category,
+            key=key,
+            value=value,
+            source=source,
+            confidence=confidence,
+        )
 
     def memories(self):
 
-        return self.long_term.all()
+        return self.long_term.list(
+            agent_id=self.session.agent_id,
+            user_id=self.session.user_id,
+        )
+
+    def update_memory(self, memory_id, **changes):
+        return self.long_term.update(
+            memory_id,
+            self.session.agent_id,
+            self.session.user_id,
+            **changes,
+        )
+
+    def replace_memory(self, category, key, value, source="user", confidence=1.0):
+        return self.long_term.replace(
+            self.session.agent_id,
+            self.session.user_id,
+            category,
+            key,
+            value,
+            source,
+            confidence,
+        )
+
+    def forget_memory(self, memory_id):
+        return self.long_term.forget(
+            memory_id,
+            self.session.agent_id,
+            self.session.user_id,
+        )
 
     # -----------------------------
     # Archive
