@@ -95,10 +95,33 @@ def normalized_status(value):
 
 
 def runtime_configuration(agent: Agent):
+    agent_definition = agent_registry.load_definition(agent.id)
+    system_instructions = agent.configuration.get("systemInstructions", "")
+    conversation_behavior = (
+        "Stay engaged with the current exchange and trust its context. Answer the "
+        "immediate point without restating or paraphrasing what is already clear. "
+        "Interpret short, incomplete, or imperfect input from the conversation; if "
+        "clarification is genuinely needed, ask one short question about the next "
+        "useful detail, not a list of possibilities. When several details are needed, "
+        "ask for only the single most useful next detail, use each answer immediately, "
+        "and do not turn the conversation into a checklist or repeat what is already "
+        "known. Say about as much as a natural person would need in that moment. Use "
+        "plain spoken language and stop when the point is answered. Do not add habitual "
+        "acknowledgements, greetings, customer-service framing, explanations of "
+        "uncertainty, offers of help, or extra questions. Keep this behavior consistent "
+        "with the configured agent type, personality, tone, and conversation style."
+    )
+
     return {
         **agent.configuration,
         "agent_id": agent.id,
-        "agent_definition": agent_registry.load_definition(agent.id),
+        "agent_definition": "\n\n".join(
+            part for part in (
+                agent_definition,
+                system_instructions,
+                conversation_behavior,
+            ) if part
+        ),
         "name": agent.name,
         "goal": agent.goal,
         "description": agent.description,
@@ -369,6 +392,12 @@ async def start(payload: StartRequest):
         f"llm_model={configuration.get('llmModel', 'sonar')}"
     )
 
+    memory.configure(
+        agent_id=agent.id,
+        user_id=user_id,
+        configuration=configuration,
+    )
+
     runtime.configure(
         agent=agent,
         stt=selected_stt,
@@ -447,11 +476,51 @@ async def generate_prompt(payload: PromptGeneratorRequest):
 You are helping configure a voice agent. {task} for exactly these sections:
 Purpose & Context, System Instructions, Goals & Success Criteria, Allowed Topics, Restricted Topics,
 Escalation Rules, and Human Handoff Conditions.
-Use the provided agent configuration as context. For improve mode, preserve the user's intent,
-do not invent policies, prices, capabilities, business rules, hours, products, services, or facts,
-and mention missing information as suggestions instead. Make the content specific to the agent's
-role and goals, and keep it realistic for a voice agent: concise spoken responses, clear role boundaries,
-helpful follow-up questions, and safe escalation paths.
+Use the provided agent configuration as one coherent behavioral specification: Agent Type,
+Personality, Tone, Conversational Style, Purpose, and Goals must all work together. The generated
+instructions should reflect the actual role the agent is performing and sound like a capable human
+fulfilling that role, without pretending to be human or inventing a fake identity.
+
+Synthesize the configuration into a single, natural system prompt rather than a stack of separate
+generic paragraphs. The chosen Agent Type should shape how the agent behaves in conversation, while
+Personality and Tone adjust its attitude, and Conversational Style governs pacing and delivery.
+The result should sound like a real person in that role: calm, practical, and resolution-focused when
+appropriate; patient, explanatory, and understanding when the role requires teaching; encouraging but
+challenging when the role is coaching; curious and conversational when the role is sales-oriented.
+
+The generated systemInstructions should tell the agent to talk with the user directly, as someone already
+engaged in the conversation, rather than performing "being conversational." Listen to what the user
+actually said, answer the immediate point first, get to the point quickly, and use only as many words as
+the situation needs. Keep simple answers genuinely simple and expand only when the user needs or asks for
+more. Respond to context instead of restating it, avoid unnecessary framing or politeness padding, do not
+explain what you are about to say, do not summarize what the user just said, and do not automatically offer
+more help or ask a follow-up question. Stop naturally once the point is answered. Let the role,
+personality, tone, and style determine the exact expression of this directness.
+
+Be as concise as a natural human would be in that moment, without a rigid sentence-count rule. Prefer an
+answer followed by a brief useful explanation only when needed, then stop, rather than acknowledgement,
+restatement, explanation, summary, and an invitation for another question. Do not habitually use assistant-
+like framing such as "Absolutely!", "Of course!", "Great question!", "I'd be happy to", "Let me explain",
+"Certainly!", "I understand that", "Based on what you've shared", "Here's what I would suggest", "I hope
+that helps", or "Is there anything else I can help you with?" Use such wording only when it genuinely fits
+the situation, not as automatic padding. Natural conversation does not mean constant slang, fillers, short
+replies, incomplete answers, fake spontaneity, fake uncertainty, forced humor, or forced warmth; remain
+competent and complete when the situation requires it, and never pretend to be human.
+
+For voice interaction, prefer natural spoken phrasing, normal sentences, conversational flow, and clarity
+over formatting. Do not use Markdown, headings, bullets, numbered lists, emojis, or decorative symbols
+unless the user explicitly requests a formatted response. Numbers are fine when they are genuinely useful,
+but do not create essay-like or list-heavy spoken output. Avoid forced speech fillers such as "um" or "uh",
+repetitive acknowledgements, and polished or over-explanatory responses that do not serve the user's need.
+When relevant, use remembered context naturally without referencing internal memory systems, retrieval, or
+architecture; current user statements should take precedence.
+
+For improve mode, preserve the user's intent, do not invent policies, prices, capabilities, business
+rules, hours, products, services, or facts, and mention missing information as suggestions instead.
+Make the content specific to the agent's role and goals, and keep it realistic for a voice agent with
+clear role boundaries, sensible escalation paths, and helpful follow-up questions only when they are
+useful.
+
 Return only valid JSON with this shape:
 {{
   "purpose":"...",
@@ -487,7 +556,7 @@ Configuration: {request_context}
 
 @app.post("/stop")
 async def stop():
-    await runtime.stop()
+    await runtime.stop(cancel_memory_tasks=False)
     return {"status": "stopped"}
 
 # -----------------------------

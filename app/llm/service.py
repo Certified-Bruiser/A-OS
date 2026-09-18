@@ -67,6 +67,43 @@ class LLMService:
             os.getenv("PERPLEXITY_API_KEY")
         )
 
+    async def generate_structured(self, prompt, conversation_context, schema):
+        model = self.agent_configuration.get(
+            "llmModel",
+            "sonar",
+        )
+
+        response = await self.client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": self._agent_system_prompt(),
+                },
+                {
+                    "role": "user",
+                    "content": f"""Conversation history:
+
+{conversation_context}
+
+User:
+
+{prompt}""",
+                },
+            ],
+            stream=False,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "prompt_generator_response",
+                    "schema": schema,
+                    "strict": True,
+                },
+            },
+        )
+
+        return response.choices[0].message.content or ""
+
     # ======================================================
     # STREAM LLM RESPONSE
     # ======================================================

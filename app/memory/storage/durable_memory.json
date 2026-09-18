@@ -1,3 +1,74 @@
 {
-    "memories": []
+    "memories": [
+        {
+            "agent_id": "d92a865e-407b-43fc-9a27-862bdae1bf46",
+            "user_id": "AOS-V7QPRK3",
+            "category": "identity",
+            "key": "name",
+            "value": "Rahul",
+            "source": "conversation",
+            "confidence": 1,
+            "status": "active",
+            "id": "0293270f-bae0-4b32-b31b-26b689e55736",
+            "created_at": "2026-09-18T04:51:03.170590+00:00",
+            "updated_at": "2026-09-18T04:51:03.170590+00:00",
+            "last_used_at": null
+        },
+        {
+            "agent_id": "2f53c4f4-c183-4ca3-b5ed-b6535816c32c",
+            "user_id": "AOS-268PHUR",
+            "category": "goal",
+            "key": "rental_intent",
+            "value": "wants to rent out their flat",
+            "source": "conversation",
+            "confidence": 0.6,
+            "status": "active",
+            "id": "e1359897-bc66-4f0a-854f-2d888ea6865b",
+            "created_at": "2026-09-18T05:54:03.623232+00:00",
+            "updated_at": "2026-09-18T05:54:03.623232+00:00",
+            "last_used_at": null
+        },
+        {
+            "agent_id": "2f53c4f4-c183-4ca3-b5ed-b6535816c32c",
+            "user_id": "AOS-268PHUR",
+            "category": "context",
+            "key": "housing_status",
+            "value": "renting",
+            "source": "conversation",
+            "confidence": 0.9,
+            "status": "active",
+            "id": "8dd1b907-07c1-4e0e-811c-335a01754785",
+            "created_at": "2026-09-18T06:27:58.334320+00:00",
+            "updated_at": "2026-09-18T06:27:58.334320+00:00",
+            "last_used_at": null
+        },
+        {
+            "agent_id": "2f53c4f4-c183-4ca3-b5ed-b6535816c32c",
+            "user_id": "AOS-268PHUR",
+            "category": "goal",
+            "key": "rent_out_flat",
+            "value": "Wants to rent out their flat",
+            "source": "conversation",
+            "confidence": 0.9,
+            "status": "active",
+            "id": "e2f7cd0b-a931-4b8e-bf6e-1fa205e8009f",
+            "created_at": "2026-09-18T06:28:11.623327+00:00",
+            "updated_at": "2026-09-18T06:28:11.623327+00:00",
+            "last_used_at": null
+        },
+        {
+            "agent_id": "2f53c4f4-c183-4ca3-b5ed-b6535816c32c",
+            "user_id": "AOS-268PHUR",
+            "category": "context",
+            "key": "property_of_interest",
+            "value": "Flat 10, Provident Sanvad, Kengeri",
+            "source": "conversation",
+            "confidence": 0.9,
+            "status": "active",
+            "id": "3495da7f-6cfc-44f2-a7a6-e71e0a3b5a06",
+            "created_at": "2026-09-18T06:28:59.055898+00:00",
+            "updated_at": "2026-09-18T06:28:59.055898+00:00",
+            "last_used_at": null
+        }
+    ]
 }

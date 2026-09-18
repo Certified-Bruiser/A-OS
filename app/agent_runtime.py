@@ -135,6 +135,7 @@ class AgentOSRuntime:
         self.interrupted = False
         self.running = False
         self.task = None
+        self.memory_tasks = set()
 
         # True only while the assistant is actively generating
         # or speaking a response.
@@ -195,7 +196,7 @@ class AgentOSRuntime:
             # Start memory session.
             # --------------------------------------------------
 
-            self.memory.start_session(
+            await self.memory.start_session_async(
                 agent_id=self.agent.id if self.agent else None,
                 user_id=self.user_id,
             )
@@ -501,11 +502,62 @@ class AgentOSRuntime:
 
             self.memory.end_session()
 
+        await self._cancel_memory_learning_tasks()
+
+    def _schedule_memory_learning(self, user_transcript, assistant_response):
+        policy_enabled = self.memory.durable_memory_enabled()
+        print(f"[MEMORY] policy enabled={str(policy_enabled).lower()}")
+        if not policy_enabled:
+            print("[MEMORY] learning skipped: durable memory disabled")
+            return
+        if not user_transcript or not assistant_response:
+            return
+
+        agent_id = self.agent.id if self.agent else None
+        user_id = self.user_id
+        session_id = self.memory.session.session_id
+        print(
+            f"[MEMORY] learning scheduled agent={agent_id} "
+            f"user={user_id} session={session_id}"
+        )
+        task = asyncio.create_task(
+            self.memory.learn_from_turn(
+                self.llm,
+                user_transcript,
+                assistant_response,
+                agent_id,
+                user_id,
+                session_id,
+                memory_learning_enabled=policy_enabled,
+            )
+        )
+        self.memory_tasks.add(task)
+        task.add_done_callback(self._memory_learning_done)
+
+    def _memory_learning_done(self, task):
+        self.memory_tasks.discard(task)
+        if not task.cancelled():
+            exception = task.exception()
+            if exception:
+                print(
+                    f"[MEMORY] learning task failed "
+                    f"type={type(exception).__name__}"
+                )
+
+    async def _cancel_memory_learning_tasks(self):
+        tasks = list(self.memory_tasks)
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self.memory_tasks.clear()
+
     # ======================================================
     # STOP
     # ======================================================
 
-    async def stop(self):
+    async def stop(self, cancel_memory_tasks: bool = True):
 
         self.running = False
 
@@ -549,6 +601,9 @@ class AgentOSRuntime:
                     pass
 
             self.interrupt_task = None
+
+        if cancel_memory_tasks:
+            await self._cancel_memory_learning_tasks()
 
         # --------------------------------------------------
         # Stop microphone capture.
@@ -761,11 +816,6 @@ class AgentOSRuntime:
             }
         )
 
-        self.memory.save_message(
-            "user",
-            transcript
-        )
-
         # --------------------------------------------------
         # THINKING
         # --------------------------------------------------
@@ -778,6 +828,14 @@ class AgentOSRuntime:
         turn_timing.llm_start = time.perf_counter()
 
         context = self.memory.get_context()
+        relevant_memory = self.memory.get_relevant_memory_context(transcript)
+        if relevant_memory:
+            context = f"{context}\n{relevant_memory}" if context else relevant_memory
+
+        self.memory.save_message(
+            "user",
+            transcript
+        )
 
         response_parts = []
 
@@ -951,6 +1009,8 @@ class AgentOSRuntime:
             "assistant",
             response
         )
+
+        self._schedule_memory_learning(transcript, response)
         
         # Record LLM complete time
         turn_timing.llm_complete = time.perf_counter()

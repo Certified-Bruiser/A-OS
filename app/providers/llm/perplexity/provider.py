@@ -6,6 +6,7 @@ class PerplexityLLM(BaseLLM):
 
     id = "perplexity"
     name = "Perplexity Sonar"
+    models = ["sonar"]
 
     def __init__(self):
         self.service = LLMService()
@@ -17,4 +18,7 @@ class PerplexityLLM(BaseLLM):
     async def stream(self, prompt, context):
         async for token in self.service.stream(prompt, context):
             yield token
+
+    async def generate_structured(self, prompt, context, schema):
+        return await self.service.generate_structured(prompt, context, schema)
 

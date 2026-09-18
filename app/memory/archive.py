@@ -4,9 +4,9 @@ from pathlib import Path
 
 class ConversationArchive:
 
-    def __init__(self):
+    def __init__(self, storage=None):
         self.storage = Path(
-            "app/memory/storage/conversations"
+            storage or "app/memory/storage/conversations"
         )
 
         self.storage.mkdir(

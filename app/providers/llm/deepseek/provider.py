@@ -1,3 +1,4 @@
+import json
 import os
 
 from openai import AsyncOpenAI
@@ -68,3 +69,43 @@ User:
             text = getattr(delta, "content", None)
             if text:
                 yield text
+
+    async def generate_structured(self, prompt, context, schema):
+        configuration = self.agent_configuration
+        model = configuration.get("llmModel") or self.default_model
+        agent_definition = configuration.get("agent_definition", "")
+
+        response = await self.client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": agent_definition,
+                },
+                {
+                    "role": "user",
+                    "content": f"""Conversation history:
+
+{context}
+
+User:
+
+{prompt}
+
+Return only valid JSON matching this schema:
+{json.dumps(schema)}""",
+                },
+            ],
+            stream=False,
+            reasoning_effort="none",
+            extra_body={
+                "thinking": {
+                    "type": "disabled",
+                },
+            },
+            response_format={
+                "type": "json_object",
+            },
+        )
+
+        return response.choices[0].message.content or ""

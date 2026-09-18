@@ -11,7 +11,7 @@ def make_store(tmp_path):
 
 
 def remember(store, agent="agent-a", user="user-a", value="AgentOS"):
-    return store.remember(agent, user, "project", "current_project", value)
+    return store.remember(agent, user, "context", "current_project", value)
 
 
 def test_remember_is_structured_scoped_and_idempotent(tmp_path):
@@ -53,7 +53,7 @@ def test_replace_supersedes_old_record_and_creates_new_id(tmp_path):
     store = make_store(tmp_path)
     original = remember(store)
     replacement = store.replace(
-        "agent-a", "user-a", "project", "current_project", "AgentOS Phase 2"
+        "agent-a", "user-a", "context", "current_project", "AgentOS Phase 2"
     )
 
     assert replacement.id != original.id
@@ -67,7 +67,7 @@ def test_replace_cannot_supersede_another_owner_memory(tmp_path):
     original = remember(store)
 
     replacement = store.replace(
-        "agent-b", "user-a", "project", "current_project", "other project"
+        "agent-b", "user-a", "context", "current_project", "other project"
     )
 
     assert replacement.id != original.id
@@ -93,14 +93,14 @@ def test_validation_rejects_invalid_fields(tmp_path):
     with pytest.raises(ValueError):
         store.remember("agent-a", "user-a", "unknown", "key", "value")
     with pytest.raises(ValueError):
-        store.remember("agent-a", "user-a", "project", "key", "value", confidence=1.1)
+        store.remember("agent-a", "user-a", "context", "key", "value", confidence=1.1)
     with pytest.raises(ValueError):
         store.list("agent-a", "user-a", status="unknown")
     with pytest.raises(ValueError):
         DurableMemory(
             agent_id="agent-a",
             user_id="user-a",
-            category="project",
+            category="context",
             key="key",
             value="value",
             status="unknown",

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -16,12 +16,12 @@ class SessionManager:
         self.agent_id = agent_id
         self.user_id = user_id
 
-        self.started_at = datetime.utcnow().isoformat()
+        self.started_at = datetime.now(timezone.utc).isoformat()
 
         self.ended_at = None
 
     def end(self):
-        self.ended_at = datetime.utcnow().isoformat()
+        self.ended_at = datetime.now(timezone.utc).isoformat()
 
     def metadata(self):
         return {

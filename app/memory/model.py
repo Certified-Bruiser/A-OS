@@ -9,8 +9,9 @@ MEMORY_CATEGORIES = {
     "identity",
     "preference",
     "goal",
-    "project",
     "context",
+    "relationship",
+    "instruction",
 }
 MEMORY_SOURCES = {"user", "conversation", "system"}
 MEMORY_STATUSES = {"active", "superseded", "forgotten"}

@@ -9,7 +9,7 @@ class GeminiLLM(BaseLLM):
 
     id = "gemini"
     name = "Gemini"
-    models = ["gemini-3.8-flash"]
+    models = ["gemini-3.1-flash-lite"]
     default_model = models[0]
 
     def __init__(self):
